@@ -87,7 +87,8 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `1` · `2` | files · conversation |
 | `o` · `y` | open in browser · copy `path:line` |
 | `R` | refresh (applies changes revv noticed on GitHub) |
-| `@` | nicknames |
+| `@` | nicknames for the selected people |
+| `,` | settings |
 | `q` | back to the inbox (or quit) |
 
 In the comment editor, `ctrl+s` adds the comment to your review (or saves), `ctrl+g` posts
@@ -97,7 +98,8 @@ opens your `$EDITOR`, and `esc` cancels, keeping your draft for next time.
 The command palette (`ctrl+p`) has all actions and lets you switch themes. The diff
 colours follow the theme, and your choice is remembered.
 
-Settings live in `~/.config/revv/config.json` and are all optional:
+Press `,` for the settings screen: everything below can be changed there, and changes are saved
+right away. They live in `~/.config/revv/config.json`, a plain JSON file you can also edit:
 
 ```json
 {

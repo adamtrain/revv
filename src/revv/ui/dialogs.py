@@ -254,6 +254,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("y", "copy file path and line"),
             ("R", "refresh from GitHub"),
             ("@", "nicknames for people"),
+            (",", "settings"),
             ("ctrl+p", "command palette (themes and more)"),
             ("q", "back to inbox / quit"),
         ],

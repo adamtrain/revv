@@ -752,3 +752,47 @@ async def test_inbox_scope_toggle(backend: DemoBackend) -> None:
         await pilot.pause(0.3)
         assert not inbox.all_repos
         assert [s.key for s in inbox.sections] == ["requested", "reviewed", "mine"]
+
+
+async def test_settings_screen(app: RevvApp) -> None:
+    from textual.widgets import Select, Switch
+
+    from revv import config
+    from revv.ui.settings import SettingsScreen
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("comma")
+        await pilot.pause(0.2)
+        settings = app.screen
+        assert isinstance(settings, SettingsScreen)
+        settings.query_one("#panc", Switch).value = True
+        settings.query_one("#hide-tests", Switch).value = False
+        settings.query_one("#open-tab", Select).value = "files"
+        await pilot.pause()
+        saved = config.load_config()
+        assert saved["panc"] is True
+        assert saved["hide_by_default"] == ["generated"]
+        assert saved["open_tab"] == "files"
+        sidebar = settings.query_one("#sidebar")
+        sidebar.value = "44"  # type: ignore[attr-defined]
+        await pilot.pause()
+        assert config.load_config()["sidebar_width"] == 44
+        assert screen.query_one("#sidebar").outer_size.width == 44
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, ReviewScreen)
+
+
+async def test_typing_a_comma_in_the_editor_stays_in_the_editor(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        goto(screen.diff, code_line("src/netkit/client.py", "def delete(self, path: str)"))
+        await pilot.press("c")
+        await pilot.pause()
+        await pilot.press("a", "comma", "b", "comma", "space", "c")
+        await pilot.pause()
+        editor = app.screen
+        assert isinstance(editor, CommentEditor)
+        assert editor.query_one(TextArea).text == "a,b, c"
+        await pilot.press("escape")

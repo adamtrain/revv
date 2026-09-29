@@ -26,6 +26,7 @@ class RevvApp(App[str | None]):
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+q", "quit", "Quit", show=False, priority=True),
+        Binding("comma", "settings", "Settings", show=False),
     ]
 
     def __init__(
@@ -66,11 +67,18 @@ class RevvApp(App[str | None]):
         session = ReviewSession(self.backend, ref, cache=self.cache)
         self.push_screen(ReviewScreen(session, from_inbox=from_inbox))
 
+    def action_settings(self) -> None:
+        from revv.ui.settings import SettingsScreen
+
+        if not isinstance(self.screen, SettingsScreen):
+            self.push_screen(SettingsScreen())
+
     async def on_unmount(self) -> None:
         await self.backend.aclose()
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         yield from super().get_system_commands(screen)
+        yield SystemCommand("Settings…", "Every option in one place (,)", self.action_settings)
         if isinstance(screen, InboxScreen):
             yield SystemCommand(
                 "Nicknames…", "Choose the names you see for people (@)", screen.action_nicknames
