@@ -1098,6 +1098,9 @@ class ReviewScreen(Screen):
 
     @work(group="viewed")
     async def toggle_viewed(self, section: FileSection) -> None:
+        if section.is_orphan:
+            self.notify("That file isn't part of the pull request's diff anymore", timeout=2)
+            return
         viewed = not section.file.is_viewed
         target = self._pr_file(section)
         task = await self._optimistic(self.session.set_viewed(target, viewed))
@@ -1168,7 +1171,7 @@ class ReviewScreen(Screen):
 
     @work(group="viewed")
     async def mark_sections_viewed(self, sections: list[FileSection], label: str, key: str) -> None:
-        files = [self._pr_file(s) for s in sections if not s.file.is_viewed]
+        files = [self._pr_file(s) for s in sections if not s.file.is_viewed and not s.is_orphan]
         ok = True
         if files:
             ok = await self._run("mark files as viewed", self.session.set_viewed_many(files, True))

@@ -127,7 +127,8 @@ class FileTree(Tree[FileSection | None]):
         viewed = file.is_viewed
         text = Text()
         text.append(file.status.letter + " ", p.style(status_color, bold=True))
-        text.append(name, p.style(p.faint) if viewed else p.style(p.text))
+        style = p.style(p.faint) if viewed or section.is_orphan else p.style(p.text)
+        text.append(name, p.style(p.muted, italic=True) if section.is_orphan else style)
         if section.pending_count:
             text.append(f" ✎{section.pending_count}", p.style(p.warning_fg))
         if section.unresolved_count:

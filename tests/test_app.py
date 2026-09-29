@@ -67,8 +67,10 @@ async def test_loads_pull_request(app: RevvApp) -> None:
     async with app.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
         assert screen.pr.title.startswith("Retry failed requests")
-        assert len(screen.diff.sections) == 11
+        assert len(screen.diff.sections) == 12
         paths = [s.path for s in screen.diff.sections]
+        # a thread on a file the pull request no longer changes still gets a place
+        assert paths[-1] == "src/netkit/compat.py" and screen.diff.sections[-1].is_orphan
         assert paths[0] == "docs/architecture.png"  # folders first, like the tree
         assert screen.focused is screen.diff
 
@@ -641,7 +643,7 @@ async def test_changes_since_last_review(app: RevvApp, backend: DemoBackend) -> 
         await pilot.press("L")
         await pilot.pause(0.2)
         assert screen.since is None
-        assert len(screen.diff.sections) == 11
+        assert len(screen.diff.sections) == 12
         assert not banner.display
 
 
@@ -796,3 +798,22 @@ async def test_typing_a_comma_in_the_editor_stays_in_the_editor(app: RevvApp) ->
         assert isinstance(editor, CommentEditor)
         assert editor.query_one(TextArea).text == "a,b, c"
         await pilot.press("escape")
+
+
+async def test_outdated_thread_on_a_file_no_longer_in_the_diff(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        orphan = next(t for t in screen.pr.threads if t.path == "src/netkit/compat.py")
+        assert orphan.is_outdated and not orphan.is_resolved
+        screen.diff.set_cursor(0)
+        for _ in range(len(screen.pr.threads)):
+            await pilot.press("u")
+            await pilot.pause()
+            row = screen.diff.current_row
+            if row is not None and row.thread is orphan:
+                break
+        else:
+            raise AssertionError("u never reached the outdated thread")
+        await pilot.press("v")  # not part of the diff: nothing to mark
+        await pilot.pause()
+        assert not screen.diff.current_section.file.is_viewed  # type: ignore[union-attr]

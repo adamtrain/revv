@@ -757,6 +757,28 @@ class DemoBackend:
             ),
             ReviewThread(
                 id=self._id("PRRT"),
+                path="src/netkit/compat.py",  # no longer changed by the pull request
+                side=Side.RIGHT,
+                line=None,
+                original_line=12,
+                is_outdated=True,
+                viewer_can_resolve=True,
+                comments=[
+                    self._comment(
+                        "hubot",
+                        "Is this shim still needed once `urls.py` lands?",
+                        30,
+                        diff_hunk=(
+                            "@@ -9,4 +9,6 @@\n"
+                            " import sys\n"
+                            "+if sys.version_info < (3, 11):\n"
+                            "+    from backports import tomllib"
+                        ),
+                    )
+                ],
+            ),
+            ReviewThread(
+                id=self._id("PRRT"),
                 path="README.md",
                 side=Side.RIGHT,
                 line=None,

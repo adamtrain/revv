@@ -118,6 +118,11 @@ class FileSection:
     def path(self) -> str:
         return self.file.path
 
+    @property
+    def is_orphan(self) -> bool:
+        """Not part of the diff anymore; only here for comments left on an earlier version."""
+        return self.file.status == FileStatus.UNCHANGED
+
     def head_lines(self) -> list[str] | None:
         """The first lines of the file, if we have them (to spot generated-file headers)."""
         if self.new_lines is not None:
@@ -364,7 +369,11 @@ def build_rows(section: FileSection, geo: Geometry, thread_height: ThreadHeight)
 
     file = section.file
     if not section.hunks:
-        if file.patch is None and file.status != FileStatus.RENAMED:
+        if file.status == FileStatus.UNCHANGED:
+            text = (
+                "No longer changed by this pull request: these comments are on an earlier version"
+            )
+        elif file.patch is None and file.status != FileStatus.RENAMED:
             text = (
                 "Binary file not shown"
                 if file.additions + file.deletions == 0

@@ -25,7 +25,7 @@ from textual.strip import Strip
 from revv.classify import GitAttributes
 from revv.diff import DiffLine, LineKind
 from revv.highlight import display_text
-from revv.models import Comment, FileStatus, PullRequest, ReviewThread, Side
+from revv.models import ChangedFile, Comment, FileStatus, PullRequest, ReviewThread, Side
 from revv.ui.diffmodel import MAX_WRAP_ROWS, FileSection, Geometry, Row, RowKind, build_rows
 from revv.ui.palette import Palette
 from revv.ui.render import MarkdownRenderer, RenderedThread, ThreadRenderer, segments
@@ -220,7 +220,16 @@ class DiffView(ScrollView, can_focus=True):
         old = {s.path: s for s in self.sections} if keep_state else {}
         self.pr = pr
         sections = []
-        for index, file in enumerate(pr.files):
+        # Threads can sit on files the pull request no longer changes (e.g. the change
+        # was reverted); give those files a place too, so every thread can be reached.
+        changed = {f.path for f in pr.files}
+        orphans = (
+            []
+            if self.since_mode  # that view deliberately shows only part of the files
+            else sorted({t.path for t in pr.threads if t.path not in changed}, key=str.lower)
+        )
+        files = [*pr.files, *(ChangedFile(path, FileStatus.UNCHANGED) for path in orphans)]
+        for index, file in enumerate(files):
             section = FileSection(file, index)
             previous = old.get(file.path)
             if previous is not None and previous.file.patch == file.patch:
@@ -758,7 +767,13 @@ class DiffView(ScrollView, can_focus=True):
         ]
         if not candidates:
             kind = "unresolved threads" if unresolved else "comment threads"
-            self.notify(f"No {kind} in this pull request", timeout=2)
+            qualifies = current_thread is not None and not (
+                unresolved and current_thread.is_resolved
+            )
+            if qualifies:
+                self.notify(f"This is the only one of the {kind}", timeout=2)
+            else:
+                self.notify(f"No {kind} in this pull request", timeout=2)
             return
         if direction > 0:
             ahead = [entry for entry in candidates if entry[0] > here]
