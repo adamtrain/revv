@@ -869,6 +869,7 @@ class DemoBackend:
             mergeable="MERGEABLE",
             labels=[Label("enhancement", "a2eeef"), Label("networking", "5319e7")],
             review_requests=[VIEWER],
+            team_review_requests=["acme/python-reviewers"],
             latest_reviews={"mona": "CHANGES_REQUESTED", "hubot": "COMMENTED"},
             files=changed,
             threads=threads,

@@ -403,7 +403,7 @@ class ConversationView(VerticalScroll):
         inner = width - 4
         bg = p.style(bg=p.bg)
         people = self._reviewer_lines(pr)
-        side = min(38, max(24, max((line.cell_len for line in people), default=0) + 1))
+        side = min(34, max(20, max((line.cell_len for line in people), default=0) + 1))
         if people and inner - side - 3 >= 48:
             # reviewers in a column to the right of the description
             left_width = inner - side - 3
@@ -435,32 +435,37 @@ class ConversationView(VerticalScroll):
 
     @staticmethod
     def reviewer_logins(pr: PullRequest) -> list[str]:
-        """Everyone in the reviewers table: who reviewed, then who's still requested."""
+        """The people in the reviewers table: who reviewed, then who's still requested."""
         logins = list(pr.latest_reviews)
         logins += [login for login in pr.review_requests if login not in pr.latest_reviews]
         return logins
 
     def _reviewer_lines(self, pr: PullRequest) -> list[Text]:
+        """Each reviewer on one line and their state indented below, so it fits a narrow
+        column; teams are marked as such."""
         p = self.palette
-        logins = self.reviewer_logins(pr)
-        if not logins:
+        people = self.reviewer_logins(pr)
+        teams = [team for team in pr.team_review_requests if team not in people]
+        if not people and not teams:
             return []
         lines = [Text("Reviewers", p.style(p.muted, p.bg, bold=True))]
-        names = {login: display_name(login) for login in logins}
-        width = max(len(name) for name in names.values())
-        for login in logins:
+        for login in people:
             state = pr.latest_reviews.get(login)
             if state is None:
-                verb, color = ("team requested" if "/" in login else "requested"), p.warning_fg
+                verb, color = "requested", p.warning_fg
             else:
                 verb, tone = REVIEW_VERBS.get(state, (state.lower(), "muted"))
                 color = {"success": p.add_fg, "error": p.del_fg, "warning": p.warning_fg}.get(
                     tone, p.muted
                 )
-            line = Text()
-            line.append(names[login].ljust(width), p.style(p.author_color(login), p.bg, bold=True))
-            line.append(f"  {verb}", p.style(color, p.bg))
-            lines.append(line)
+            lines.append(Text(display_name(login), p.style(p.author_color(login), p.bg, bold=True)))
+            lines.append(Text(f"  {verb}", p.style(color, p.bg)))
+        for team in teams:
+            name = Text()
+            name.append(" team ", p.style(p.primary_fg, p.mix(p.primary, 0.22), bold=True))
+            name.append(f" {team}", p.style(p.primary_fg, p.bg, bold=True))
+            lines.append(name)
+            lines.append(Text("  requested", p.style(p.warning_fg, p.bg)))
         return lines
 
     def _comment(self, comment: Comment, width: int, focused: bool, expanded: bool) -> list[Strip]:

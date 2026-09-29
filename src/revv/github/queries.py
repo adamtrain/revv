@@ -69,7 +69,7 @@ query PullRequest($owner: String!, $name: String!, $number: Int!) {{
         nodes {{ requestedReviewer {{
           __typename
           ... on User {{ login }}
-          ... on Team {{ slug }}
+          ... on Team {{ combinedSlug }}
           ... on Bot {{ login }}
           ... on Mannequin {{ login }}
         }} }}

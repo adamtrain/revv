@@ -277,7 +277,8 @@ class PullRequest:
     checks_state: str | None = None
     mergeable: str = "UNKNOWN"
     labels: list[Label] = field(default_factory=list)
-    review_requests: list[str] = field(default_factory=list)
+    review_requests: list[str] = field(default_factory=list)  # people (logins)
+    team_review_requests: list[str] = field(default_factory=list)  # teams ("org/slug")
     latest_reviews: dict[str, str] = field(default_factory=dict)  # login -> state
     files: list[ChangedFile] = field(default_factory=list)
     threads: list[ReviewThread] = field(default_factory=list)

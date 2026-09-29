@@ -212,10 +212,15 @@ def parse_pull_request(data: Json, ref: PRRef) -> tuple[PullRequest, dict[str, s
                 authored_at=parse_time(commit.get("authoredDate")),
             )
         )
-    requests = []
+    requests: list[str] = []
+    team_requests: list[str] = []
     for request in _nodes(node.get("reviewRequests")):
         reviewer = request.get("requestedReviewer")
-        if reviewer:
+        if not reviewer:
+            continue
+        if reviewer.get("__typename") == "Team":
+            team_requests.append(reviewer.get("combinedSlug") or reviewer.get("slug") or "team")
+        else:
             requests.append(_login(reviewer))
     latest = {}
     for review in _nodes(node.get("latestReviews")):
@@ -246,6 +251,7 @@ def parse_pull_request(data: Json, ref: PRRef) -> tuple[PullRequest, dict[str, s
         mergeable=node.get("mergeable") or "UNKNOWN",
         labels=[Label(n["name"], n.get("color", "888888")) for n in _nodes(node.get("labels"))],
         review_requests=requests,
+        team_review_requests=team_requests,
         latest_reviews=latest,
         files=[parse_graphql_file(f) for f in _nodes(node.get("files"))],
         threads=[parse_thread(t) for t in _nodes(node.get("reviewThreads"))],
