@@ -43,11 +43,11 @@ def state_badge(pr: PullRequest, p: Palette) -> Text:
 
 
 class PRHeader(Widget):
-    """Two lines: title, then state, branches, checks and review progress."""
+    """Three lines: the title and tabs; state, branches and checks; your progress."""
 
     DEFAULT_CSS = """
     PRHeader {
-        height: 2;
+        height: 3;
         background: $panel;
         padding: 0 1;
     }
@@ -74,23 +74,19 @@ class PRHeader(Widget):
         pr = self.pr
         if pr is None:
             return Text(f"revv  {self.message}", p.style(p.muted))
-        top = Text()
-        top.append(f"{pr.ref.repo.full_name} ", p.style(p.muted))
-        top.append(f"#{pr.ref.number} ", p.style(p.primary_fg, bold=True))
-        top.append(pr.title, p.style(p.text, bold=True))
+
+        def line(left: Text, right: Text) -> Text:
+            left.truncate(max(10, width - right.cell_len - 2), overflow="ellipsis")
+            left.pad_right(max(0, width - left.cell_len - right.cell_len))
+            left.append_text(right)
+            return left
+
+        # 1: what it is, and where you are
+        title = Text()
+        title.append(f"{pr.ref.repo.full_name} ", p.style(p.muted))
+        title.append(f"#{pr.ref.number} ", p.style(p.primary_fg, bold=True))
+        title.append(pr.title, p.style(p.text, bold=True))
         tabs = Text()
-        for key, name, label in (
-            ("1", "files", f"Files {len(pr.files)}"),
-            ("2", "conversation", f"Conversation {len(pr.comments) + len(pr.threads)}"),
-        ):
-            active = self.tab == name
-            style = p.style(p.bg, p.primary, bold=True) if active else p.style(p.muted, p.panel)
-            tabs.append(
-                f" {key} ",
-                p.style(p.faint if not active else p.bg, p.panel if not active else p.primary),
-            )
-            tabs.append(f"{label} ", style)
-            tabs.append(" ")
         if self.ai is not None and not self.ai.error and self.ai.verdict:
             verdict = self.ai.verdict.strip()
             color = {"ai": p.error, "human": p.success}.get(verdict.lower(), p.warning)
@@ -99,49 +95,66 @@ class PRHeader(Widget):
                 if verdict.lower() == "human"
                 else f" {verdict.upper()} {self.ai.fraction_ai:.0%} AI "
             )
-            chip = Text(label, p.style(color.get_contrast_text(1.0), color, bold=True))
-            chip.append(" ")
-            chip.append_text(tabs)
-            tabs = chip
-        top.truncate(max(10, width - tabs.cell_len - 1), overflow="ellipsis")
-        top.pad_right(max(0, width - top.cell_len - tabs.cell_len))
-        top.append_text(tabs)
+            tabs.append(label, p.style(color.get_contrast_text(1.0), color, bold=True))
+            tabs.append("  ")
+        for key, name, label in (
+            ("1", "files", f"Files {len(pr.files)}"),
+            ("2", "conversation", f"Conversation {len(pr.comments) + len(pr.threads)}"),
+        ):
+            active = self.tab == name
+            key_style = p.style(p.bg, p.primary) if active else p.style(p.faint, p.panel)
+            label_style = (
+                p.style(p.bg, p.primary, bold=True) if active else p.style(p.muted, p.panel)
+            )
+            tabs.append(f" {key} ", key_style)
+            tabs.append(f"{label} ", label_style)
+            tabs.append(" ")
 
-        bottom = Text()
-        bottom.append_text(state_badge(pr, p))
-        bottom.append(" ")
-        bottom.append(display_name(pr.author), p.style(p.author_color(pr.author), bold=True))
-        bottom.append("  ")
-        bottom.append(pr.head_ref, p.style(p.primary_fg))
-        bottom.append(" → ", p.style(p.faint))
-        bottom.append(pr.base_ref, p.style(p.primary_fg))
-        bottom.append(f"  {relative_time(pr.updated_at)}", p.style(p.faint))
+        # 2: state, people and branches; CI and the review decision on the right
+        who = Text()
+        who.append_text(state_badge(pr, p))
+        who.append("  ")
+        who.append(display_name(pr.author), p.style(p.author_color(pr.author), bold=True))
+        who.append("  ")
+        who.append(pr.head_ref, p.style(p.primary_fg))
+        who.append(" → ", p.style(p.faint))
+        who.append(pr.base_ref, p.style(p.primary_fg))
+        who.append(f"  · updated {relative_time(pr.updated_at)}", p.style(p.faint))
+        if pr.total_commits:
+            commits = pr.total_commits
+            who.append(f" · {commits} commit{'s' if commits != 1 else ''}", p.style(p.faint))
+        status = Text()
         if pr.checks_state in CHECK_MARKS:
             label, color = CHECK_MARKS[pr.checks_state]
-            bottom.append("  ")
-            bottom.append(label, p.style(tone(p, color)))
+            status.append(label, p.style(tone(p, color)))
         if pr.review_decision in DECISIONS:
             label, color = DECISIONS[pr.review_decision]
-            bottom.append("  ")
-            bottom.append(label, p.style(tone(p, color)))
-        bottom.append(f"  +{pr.additions}", p.style(p.add_fg))
-        bottom.append(f" −{pr.deletions}", p.style(p.del_fg))
+            if status:
+                status.append("   ")
+            status.append(label, p.style(tone(p, color)))
 
-        right = Text()
-        if self.syncing:
-            right.append("⟳ syncing  ", p.style(p.primary_fg))
-        right.append_text(self._progress(pr, p))
+        # 3: your review: progress, open threads, size; the pending review on the right
+        progress = self._progress(pr, p)
         unresolved = pr.unresolved_count
         if unresolved:
-            right.append(f"  ● {unresolved} open", p.style(p.accent_fg))
+            progress.append(
+                f"   ● {unresolved} open thread{'s' if unresolved != 1 else ''}",
+                p.style(p.accent_fg),
+            )
+        progress.append(f"   +{pr.additions}", p.style(p.add_fg))
+        progress.append(f" −{pr.deletions}", p.style(p.del_fg))
+        review = Text()
+        if self.syncing:
+            review.append("⟳ syncing  ", p.style(p.primary_fg))
         if pr.pending_review is not None:
             pending = pr.pending_comment_count
-            right.append("  ")
-            right.append(f" ✎ {pending} pending · S submit ", p.style(p.bg, p.warning, bold=True))
-        bottom.truncate(max(10, width - right.cell_len - 2), overflow="ellipsis")
-        bottom.pad_right(max(0, width - bottom.cell_len - right.cell_len))
-        bottom.append_text(right)
-        return Text("\n").join([top, bottom])
+            review.append(
+                f" ✎ {pending} pending comment{'s' if pending != 1 else ''} · S to submit ",
+                p.style(p.bg, p.warning, bold=True),
+            )
+        elif not pr.viewer_did_author:
+            review.append("S review · A approve", p.style(p.faint))
+        return Text("\n").join([line(title, tabs), line(who, status), line(progress, review)])
 
     def _progress(self, pr: PullRequest, p: Palette) -> Text:
         """How much of the change has been viewed, weighted by changed lines."""
@@ -157,7 +170,7 @@ class PRHeader(Widget):
         text.append("━" * filled, p.style(color))
         text.append("━" * (width - filled), p.style(p.fg_mix(0.18)))
         text.append(f" {fraction:.0%}", p.style(color, bold=True))
-        text.append(f" · {viewed}/{len(files)} files", p.style(p.muted))
+        text.append(f" · {viewed}/{len(files)} files viewed", p.style(p.muted))
         return text
 
     async def on_click(self, event) -> None:

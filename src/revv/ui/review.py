@@ -320,7 +320,7 @@ class ReviewScreen(Screen):
                 if text:
                     text.append("\n")
                 text.append(f"⊘ {count} {label} hidden", p.style(p.muted))
-                text.append(f" · {key} to show", p.style(p.faint))
+                text.append(f" · {key}", p.style(p.accent_fg, bold=True))
         note.update(text)
         note.display = True
 
@@ -538,8 +538,6 @@ class ReviewScreen(Screen):
                     )
                     if number is not None:
                         location += f":{number}"
-        viewed = sum(1 for f in self.pr.files if f.is_viewed)
-        location += f" · {viewed}/{len(self.pr.files)} viewed"
         status.show(hints, location)
 
     # -- navigation ------------------------------------------------------------------
