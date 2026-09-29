@@ -20,7 +20,7 @@ from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv.classify import GitAttributes
-from revv.config import display_name, set_nicknames, setting
+from revv.config import display_name, save_config, set_nicknames, setting
 from revv.diff import DiffLine, LineKind, parse_patch
 from revv.models import (
     REACTION_EMOJI,
@@ -134,7 +134,7 @@ class ReviewScreen(Screen):
     ReviewScreen { layout: vertical; }
     ReviewScreen #tabs { height: 1fr; }
     ReviewScreen #files { height: 1fr; }
-    ReviewScreen #sidebar { width: 34; max-width: 40%; border-right: vkey $panel; }
+    ReviewScreen #sidebar { width: 34; max-width: 75%; border-right: vkey $panel; }
     ReviewScreen #sidebar:focus-within { border-right: vkey $accent; }
     ReviewScreen FileTree { height: 1fr; }
     ReviewScreen #banner {
@@ -173,6 +173,8 @@ class ReviewScreen(Screen):
         Binding("y", "copy_location", "Copy location", show=False),
         Binding("at", "nicknames", "Nicknames", show=False),
         Binding("L", "since_review", "Since last review", show=False),
+        Binding("less_than_sign", "sidebar_width(-4)", "Narrower tree", show=False),
+        Binding("greater_than_sign", "sidebar_width(4)", "Wider tree", show=False),
         Binding("plus", "react", "React", show=False),
         Binding("T", "hide_kind('test')", "Hide tests", show=False),
         Binding("X", "hide_kind('generated')", "Hide generated", show=False),
@@ -229,6 +231,7 @@ class ReviewScreen(Screen):
         return self.query_one(ContentSwitcher).current or "files"
 
     def on_mount(self) -> None:
+        self._apply_sidebar_width(setting("sidebar_width"))
         kinds = setting("hide_by_default")
         self.diff.hidden_kinds = {k for k in kinds if k in ("test", "generated")}
         self.header.show(None, f"Loading {self.session.ref}…")
@@ -541,10 +544,26 @@ class ReviewScreen(Screen):
             self.conversation.focus_first()
         self.update_status()
 
+    SIDEBAR_MIN, SIDEBAR_MAX = 16, 120
+
+    def _apply_sidebar_width(self, width: int) -> int:
+        width = max(self.SIDEBAR_MIN, min(self.SIDEBAR_MAX, int(width)))
+        self.query_one("#sidebar").styles.width = width
+        return width
+
+    def action_sidebar_width(self, delta: int) -> None:
+        sidebar = self.query_one("#sidebar")
+        if not sidebar.display:
+            sidebar.display = True
+        current = sidebar.styles.width.value if sidebar.styles.width else 34
+        width = self._apply_sidebar_width(int(current) + delta)
+        save_config(sidebar_width=width)
+        self.notify(f"File tree: {width} columns", timeout=1)
+
     def action_toggle_tree(self) -> None:
-        tree = self.file_tree
-        tree.display = not tree.display
-        if not tree.display and tree.has_focus:
+        sidebar = self.query_one("#sidebar")
+        sidebar.display = not sidebar.display
+        if not sidebar.display and self.file_tree.has_focus:
             self.diff.focus()
 
     def action_find_file(self) -> None:

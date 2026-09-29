@@ -618,3 +618,23 @@ async def test_reactions(app: RevvApp) -> None:
         await pilot.press("7")  # 🚀
         await pilot.pause(0.1)
         assert any(r.content == "ROCKET" and r.viewer_has_reacted for r in screen.pr.reactions)
+
+
+async def test_sidebar_width_is_adjustable_and_remembered(app: RevvApp) -> None:
+    from revv import config
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        sidebar = screen.query_one("#sidebar")
+        start = sidebar.outer_size.width
+        await pilot.press("greater_than_sign", "greater_than_sign")
+        await pilot.pause()
+        assert sidebar.outer_size.width == start + 8
+        assert config.load_config()["sidebar_width"] == start + 8
+        await pilot.press("less_than_sign")
+        await pilot.pause()
+        assert config.load_config()["sidebar_width"] == start + 4
+    again = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo)
+    async with again.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        assert screen.query_one("#sidebar").outer_size.width == start + 4

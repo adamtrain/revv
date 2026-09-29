@@ -7,7 +7,8 @@ Everything here can be changed from inside the app, but the file is plain JSON t
       "hide_by_default": ["test", "generated"],
       "nicknames": {"octocat": "Octo"},
       "inbox_sort": "asc",
-      "refresh_interval": 30
+      "refresh_interval": 30,
+      "sidebar_width": 34
     }
 """
 
@@ -26,6 +27,7 @@ DEFAULTS: dict[str, Any] = {
     "ignored_prs": {},  # "host/owner/repo#number" -> when it was ignored (unix time)
     "inbox_sort": "asc",  # "asc": oldest (lowest number) first; "desc": newest first
     "refresh_interval": 30,  # seconds between checks for changes on GitHub; 0 turns them off
+    "sidebar_width": 34,  # columns of the file tree (< and > change it)
 }
 
 IGNORED_PR_TTL = 180 * 86400  # forget ignored pull requests after half a year

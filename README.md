@@ -78,6 +78,7 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `L` | only the changes since your last review (again: everything) |
 | `/` | search the changed lines |
 | `f` | go to file |
+| `t` · `<` `>` | hide the file tree · make it narrower / wider (remembered) |
 | `S` · `A` | submit review · approve |
 | `C` | comment on the pull request |
 | `1` · `2` | files · conversation |
@@ -100,7 +101,8 @@ Settings live in `~/.config/revv/config.json` and are all optional:
   "hide_by_default": ["test", "generated"],
   "nicknames": {"octocat": "Octo"},
   "inbox_sort": "asc",
-  "refresh_interval": 30
+  "refresh_interval": 30,
+  "sidebar_width": 34
 }
 ```
 

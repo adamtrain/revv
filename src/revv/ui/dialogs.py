@@ -248,6 +248,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("E", "expand the whole file"),
             ("L", "only the changes since your last review"),
             ("t", "toggle the file tree"),
+            ("< >", "narrower / wider file tree (remembered)"),
             ("o", "open in the browser"),
             ("y", "copy file path and line"),
             ("R", "refresh from GitHub"),
