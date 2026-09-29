@@ -1,44 +1,47 @@
-# revv
+<h1 align="center">revv</h1>
 
-A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built with
-[Textual](https://textual.textualize.io/).
+<p align="center">
+  <b>Review GitHub pull requests without leaving your terminal.</b><br>
+  A fast, keyboard-driven code review app: your review inbox, a diff that reads well,
+  and every comment, reply, resolve and verdict one key away.
+</p>
 
-- **A review inbox.** Run `revv` inside a repository to see every open pull request where
-  your review was requested (directly or through one of your teams) or that is assigned to
-  you. Tabs also list the ones you've reviewed and your own. Stacked pull requests fold
-  into one row showing the next one to review (`→`/`↵` unfold the stack, `←` folds it),
-  the oldest come first (`s` flips that), and `i` ignores a pull request (it moves to an
-  "Ignored" tab). Anything else is one PR number or URL away: just type it.
-- **A pleasant diff.** Every changed file in one scrollable view, syntax-highlighted, with
-  word-level highlighting of what changed on a line. Switch between unified and
-  side-by-side, expand hidden context, fold files, and jump by change, file or thread. The
-  file tree lists folders first, and the current file stays pinned at the top as you scroll.
-- **Comments where they belong.** Threads appear inline under their lines. You can comment
-  on a line, a range, or a whole file, suggest changes (```` ```suggestion ````), reply,
-  edit, delete, and resolve or unresolve.
-- **Changes since your last review.** `L` narrows the diff to what changed since the
-  commit you last reviewed, like GitHub's "changes since your last review".
-- **The conversation.** Pull requests open here (`"open_tab": "files"` changes that): the description, every review thread at a glance, and the
-  timeline. Post general comments, and resolve them the way GitHub does (hide them as
-  "resolved").
+<p align="center">
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white">
+  <a href="https://textual.textualize.io"><img alt="Built with Textual" src="https://img.shields.io/badge/built%20with-Textual-8a2be2"></a>
+  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
+  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
+</p>
+
+<p align="center">
+  <img src="docs/hero.svg" width="880" alt="revv reviewing a pull request: a three-line header with the title, state, branches, CI status, review progress and a pending-review badge; a file tree on the left with hidden test and generated files noted at the bottom; and a syntax-highlighted diff with a comment thread shown inline under the line it belongs to.">
+</p>
+
+## Why revv
+
+- **An inbox, not a firehose.** Run `revv` in a repository and you see only what involves
+  you: review requests (yours or your teams'), pull requests assigned to you, ones you've
+  reviewed, and your own. Stacked pull requests fold into one row. Anything else is one PR
+  number away.
+- **A diff that reads well.** Every file in one scrollable view, syntax-highlighted, with
+  word-level highlighting of what changed on each line. Unified or side by side, expandable
+  context, a file tree, and the current file pinned to the top as you scroll.
+- **Comments where they belong.** Threads appear inline under their lines. Comment on a
+  line, a range or a whole file, suggest changes, reply, edit, react, and resolve.
 - **Reviews the GitHub way.** Comments go into a pending review, just like "Start a review"
   on github.com, so nothing is lost if you quit. Submit with Comment, Approve or Request
-  changes. When no review is pending you can also post a single comment right away.
-- **Instant, and never stale for long.** Pull requests and the inbox open straight from
-  an on-disk cache (clearly marked as such) and sync with GitHub right away. While you
-  review, revv checks every 30 seconds whether the pull request changed and offers to
-  refresh (`R`). File contents are cached by commit, so they're never fetched twice.
-- **Viewed files.** Mark files as viewed (synced with GitHub's checkbox) and move on to the
-  next unviewed one; the header shows how far along you are, weighted by changed lines.
-  Test files and generated files are hidden by default (`T` / `X` show them).
-- **Nicknames.** Press `@` to give the people in whatever is selected (a pull request's
-  author, a thread's participants, the reviewers of the description) the names you'd
-  rather see than their logins.
+  changes, or post a single comment right away.
+- **Made for real review sessions.** Mark files viewed (synced with GitHub) and see your
+  progress weighted by changed lines. Test and generated files stay out of the way. `L`
+  shows only what changed since your last review, and `u` hops between unresolved threads.
+- **Instant, and never stale for long.** Pull requests and the inbox open from an on-disk
+  cache, clearly marked, and sync with GitHub right away. While you read, revv checks every
+  30 seconds whether anything changed and offers to refresh.
 
 ## Install
 
-revv needs Python 3.12+ and uses the [GitHub CLI](https://cli.github.com/)'s login (or a
-`GH_TOKEN` / `GITHUB_TOKEN` environment variable).
+You'll need [uv](https://docs.astral.sh/uv/) and a GitHub login from the
+[GitHub CLI](https://cli.github.com/) (or a `GH_TOKEN` / `GITHUB_TOKEN` environment variable).
 
 ```sh
 uv tool install git+https://github.com/adamtrain/revv
@@ -59,108 +62,146 @@ revv --no-cache       # don't read or write the cache in ~/.cache/revv
 
 GitHub Enterprise works too: revv follows the host of your git remote or the PR URL.
 
+## A tour
+
+<p align="center">
+  <img src="docs/inbox.svg" width="760" alt="The review inbox: tabs for To review, Reviewed and Mine; each pull request takes three lines with its title, why it's there (requested from you, from your team, or a re-review), author, age, branches, size, labels, CI status and review state; a stack of pull requests is folded into one row showing the next one to review.">
+</p>
+
+**The inbox** lists the oldest pull requests first (`s` flips it). Each row says why it's
+there: requested from you, from one of your teams, assigned, or a re-review. A stack folds
+into one row showing the next pull request to review; `→` or `↵` unfold it and `←` folds it
+back. `i` ignores a pull request (it moves to an "Ignored" tab), and typing a number or URL
+opens any pull request.
+
+<p align="center">
+  <img src="docs/conversation.svg" width="800" alt="The conversation tab: the pull request description rendered as markdown with a small table of reviewers and their review states beside it, followed by every review thread at a glance and the timeline of comments.">
+</p>
+
+**The conversation** is where a pull request opens: the description with its reviewers beside
+it, every review thread at a glance (`↵` jumps to it in the code), and the timeline. `x`
+resolves a general comment the way GitHub does, by hiding it as "resolved".
+
+<p align="center">
+  <img src="docs/split.svg" width="880" alt="The side-by-side diff: old code on the left and new code on the right, with the changed words highlighted within changed lines.">
+</p>
+
+**Side by side** (`|`) is picked automatically when your terminal is wide enough.
+
+<p align="center">
+  <img src="docs/comment.svg" width="760" alt="The comment editor, opened on an added line with a suggestion block already filled in, showing the keys to add it to the review, insert a suggestion, write it in $EDITOR, or cancel.">
+</p>
+
+**The editor**: `ctrl+s` adds the comment to your pending review (or saves an edit), `ctrl+g`
+posts it right away when no review is pending, `ctrl+t` inserts a suggestion, `ctrl+o`
+writes it in your `$EDITOR`, and `esc` cancels, keeping your draft for next time.
+
 ## Keys
 
-Press `?` in the app for the full list. The ones you'll use constantly:
+Press `?` for the full list, `ctrl+p` for the command palette.
 
-| Key | In the diff |
+| Moving around | |
 | --- | --- |
-| `j` `k` / `space` `ctrl+b` | move / page |
-| `}` `{` | next / previous change |
-| `]` `[` | next / previous file |
-| `n` `N` | next / previous comment thread |
-| `u` `U` | next / previous unresolved thread |
-| `c` or `↵` | comment on the line (on a file header: comment on the file) |
-| `V` then `c` | comment on a range of lines |
-| `s` | suggest a change |
-| `r` · `x` · `e` · `d` | reply · resolve/unresolve · edit · delete |
-| `+` | react with an emoji (on comments, reviews and the description) |
-| `v` | mark the file as viewed and go to the next unviewed one |
-| `T` · `X` | show test files · generated files (they start hidden); again: hide them and mark them viewed |
-| `\|` | unified / side-by-side |
-| `L` | only the changes since your last review (again: everything) |
-| `/` | search the changed lines |
-| `f` | go to file |
-| `t` · `<` `>` | hide the file tree · make it narrower / wider (remembered) |
-| `S` · `A` | submit review · approve |
-| `C` | comment on the pull request |
+| `j` `k` · `space` `ctrl+b` · `g` `G` | line · page · top and bottom |
+| `}` `{` · `]` `[` | next / previous change · file |
+| `n` `N` · `u` `U` | next / previous thread · unresolved thread |
+| `/` · `f` | search the changed lines · go to a file |
 | `1` · `2` | files · conversation |
-| `o` · `y` | open in browser · copy `path:line` |
-| `R` | refresh (applies changes revv noticed on GitHub) |
-| `@` | nicknames for the selected people |
+
+| Reviewing | |
+| --- | --- |
+| `c` or `↵` · `V` then `c` · `s` | comment on a line (or a file header) · on a range · suggest a change |
+| `r` · `x` · `e` · `d` · `+` | reply · resolve · edit · delete · react |
+| `v` | mark the file viewed and go to the next one |
+| `T` · `X` | show test files · generated files (they start hidden); again: hide and mark viewed |
+| `L` | only the changes since your last review |
+| `S` · `A` · `C` | submit review · approve · comment on the pull request |
+| `R` · `o` · `y` | refresh · open in the browser · copy `path:line` |
+
+| Everywhere | |
+| --- | --- |
+| `\|` · `E` · `t` · `<` `>` | side by side · expand the whole file · hide the file tree · resize it |
+| `@` | nicknames for the people in view |
 | `,` | settings |
 | `q` | back to the inbox (or quit) |
 
-In the comment editor, `ctrl+s` adds the comment to your review (or saves), `ctrl+g` posts
-it right away when no review is pending, `ctrl+t` inserts a suggestion block, `ctrl+o`
-opens your `$EDITOR`, and `esc` cancels, keeping your draft for next time.
+## Settings
 
-The command palette (`ctrl+p`) has all actions and lets you switch themes. The diff
-colours follow the theme, and your choice is remembered.
+Press `,` to change any of these in the app; they're saved right away to
+`~/.config/revv/config.json`, which you can also edit by hand:
 
-Press `,` for the settings screen: everything below can be changed there, and changes are saved
-right away. They live in `~/.config/revv/config.json`, a plain JSON file you can also edit:
+| Setting | Default | |
+| --- | --- | --- |
+| `hide_by_default` | `["test", "generated"]` | file kinds hidden when a pull request opens |
+| `open_tab` | `"conversation"` | or `"files"` |
+| `refresh_interval` | `30` | seconds between checks for changes on GitHub (`0`: never) |
+| `sidebar_width` | `34` | file tree width (also `<` and `>`) |
+| `inbox_sort` | `"asc"` | oldest first; `"desc"` for newest first |
+| `nicknames` | `{}` | GitHub login → the name you'd rather see (`@` sets them) |
+| `panc` | `false` | check descriptions for AI writing (below) |
 
-```json
-{
-  "hide_by_default": ["test", "generated"],
-  "nicknames": {"octocat": "Octo"},
-  "inbox_sort": "asc",
-  "refresh_interval": 30,
-  "sidebar_width": 34,
-  "open_tab": "conversation",
-  "panc": false
-}
-```
+### Test and generated files
 
-### AI-writing check with panc (optional)
+revv matches naming and folder conventions, not the word "test", so `latest.py`, `contest.ts`
+or `testimonials.tsx` are never caught:
 
-If you have [panc](https://github.com/adamtrain/panc) (Pangram's AI detection in your
-terminal) on your `PATH` and set `"panc": true`, revv runs it on each pull request's
-description in the background. The verdict shows on the description card in the
-conversation, with a chip in the header. Results are cached per pull request and only
-re-checked when the description changes by at least 10%. It's off by default because
+- **Python:** `test_*.py`, `*_test.py`, `conftest.py`, Django's `tests.py`, and anything in a
+  `tests/` or `test/` folder.
+- **JavaScript / TypeScript:** `*.test.*`, `*.spec.*`, `*.e2e-spec.*`, `*.cy.*`, `__tests__/`,
+  `__mocks__/`, Jest setup files, and `test/` or `tests/` folders.
+- Snapshot folders (`__snapshots__/`, `*.snap`).
+- **Generated:** lockfiles, minified files and source maps, protobuf and gRPC output,
+  `__generated__/` folders, files that start with an `@generated` or `DO NOT EDIT` header,
+  and anything your repository marks `linguist-generated` in `.gitattributes`.
+
+### AI-writing check with panc
+
+With [panc](https://github.com/adamtrain/panc) on your `PATH` and `"panc": true`, revv runs it
+on each pull request description in the background and shows Pangram's verdict on the
+description card, with a chip in the header. Results are cached per pull request and
+re-checked only when the description changes by at least 10%. It's off by default because
 panc sends the description to Pangram (with your `PANGRAM_API_KEY`).
 
-### What counts as a test or generated file
+## How it works
 
-revv matches naming and folder conventions, not the word "test" (so `latest.py`,
-`contest.ts` or `testimonials.tsx` are never matched):
+revv talks to GitHub's GraphQL API for everything about a pull request (threads, reviews,
+viewed files, reactions) and uses REST only for the patches. Comments go through GitHub's
+pending reviews, so what you write is also visible (to you) on github.com until you submit.
+The inbox runs a cheap search per tab and fills in the costly details, like CI status and
+requested reviewers, afterwards. It stays fast on repositories with thousands of open pull
+requests.
 
-- **Python:** `test_*.py`, `*_test.py`, `conftest.py`, Django's `tests.py`, and anything
-  in a `tests/` or `test/` folder.
-- **JavaScript / TypeScript:** `*.test.*`, `*.spec.*`, `*.e2e-spec.*`, `*.cy.*`,
-  `__tests__/`, `__mocks__/`, Jest setup files, and `test/` / `tests/` folders.
-- Snapshot folders (`__snapshots__/`, `*.snap`).
-- **Generated:** lockfiles, minified files and source maps, protobuf/gRPC output,
-  `__generated__/` folders, files with an `@generated` or `DO NOT EDIT` header, and
-  anything your repository marks `linguist-generated` in `.gitattributes`.
+The diff is drawn with Textual's line API, so only what's on screen is rendered, even for
+very large pull requests. Pull requests, the inbox and file contents are cached (privately,
+and pruned automatically) under `~/.cache/revv`.
 
 ## Development
 
 ```sh
+git clone https://github.com/adamtrain/revv && cd revv
 uv sync
-uv run revv --demo        # the offline demo
-uv run pytest             # unit and end-to-end UI tests (offline)
+uv run revv --demo              # the offline demo
+uv run pytest                   # unit and end-to-end UI tests, all offline
 uv run ruff check && uv run ty check src
+uv run scripts/screenshots.py   # regenerate the images in docs/
 ```
 
-The tests drive the whole app with simulated key presses against an in-memory backend,
-so they need no network or GitHub account.
+The tests drive the whole app with simulated key presses against an in-memory backend, so
+they need no network or GitHub account. The screenshots come from that same demo, with
+made-up sample data.
 
 ### Live checks against GitHub (opt-in)
 
 `scripts/live_check.py` exercises every write path (comments, replies, resolving, viewed
 files, conversation comments…) against the real GitHub API. It never runs as part of the
-test suite. Run it yourself when you want it:
+tests. Run it yourself when you want it:
 
 ```sh
 uv run scripts/live_check.py --yes
 ```
 
-It uses your own credentials and your own account: on the first run it creates a
+It uses your own credentials and your own account. On the first run it creates a
 **private** repository named `<your login>/revv-sandbox` with a small pull request and one
-permanent review comment. It needs that comment because submitted reviews can't be
-deleted through the API. Later runs clean up everything they create. Delete the
-repository whenever you like; the next run sets it up again. Without `--yes` it only
-explains what it would do.
+permanent review comment; submitted reviews can't be deleted through the API, so it keeps
+that one. Later runs clean up everything they create. Delete the repository whenever you
+like; the next run sets it up again. Without `--yes` it only explains what it would do.

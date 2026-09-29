@@ -35,10 +35,18 @@ def segments(text: Text, console: Console) -> list[Segment]:
     return list(rendered)
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+# Replaceable clock (the screenshot script freezes time so images don't drift).
+clock = _now
+
+
 def relative_time(when: datetime | None, now: datetime | None = None) -> str:
     if when is None:
         return ""
-    now = now or datetime.now(UTC)
+    now = now or clock()
     seconds = (now - when).total_seconds()
     if seconds < 45:
         return "just now"
