@@ -1,0 +1,47 @@
+"""The key guidance (in-app help and README) must cover every key binding."""
+
+from pathlib import Path
+
+from revv.ui.app import RevvApp
+from revv.ui.conversation import ConversationView
+from revv.ui.dialogs import HELP_SECTIONS, SubmitReviewDialog, display_key, help_markdown
+from revv.ui.diffview import DiffView
+from revv.ui.editor import CommentEditor
+from revv.ui.filetree import FileTree
+from revv.ui.inbox import InboxScreen
+from revv.ui.review import ReviewScreen
+
+README = Path(__file__).resolve().parent.parent / "README.md"
+
+
+def documented_keys() -> set[str]:
+    return {token for _, rows in HELP_SECTIONS for keys, _ in rows for token in keys.split()}
+
+
+def test_every_binding_is_in_the_help() -> None:
+    documented = documented_keys()
+    missing = []
+    for cls in (
+        RevvApp,
+        InboxScreen,
+        ReviewScreen,
+        DiffView,
+        ConversationView,
+        FileTree,
+        CommentEditor,
+        SubmitReviewDialog,
+    ):
+        for binding in cls.BINDINGS:
+            keys = [display_key(key.strip()) for key in binding.key.split(",")]  # type: ignore[union-attr]
+            if not any(key in documented for key in keys):
+                missing.append(f"{cls.__name__}: {binding.key} ({binding.action})")  # type: ignore[union-attr]
+    assert not missing, "undocumented keys:\n" + "\n".join(missing)
+
+
+def test_readme_keys_match_the_help() -> None:
+    text = README.read_text()
+    start = text.index("<!-- keys -->\n") + len("<!-- keys -->\n")
+    end = text.index("<!-- /keys -->")
+    assert text[start:end].strip() == help_markdown().strip(), (
+        "README keys are stale: run uv run scripts/readme_keys.py"
+    )

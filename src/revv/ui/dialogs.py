@@ -206,79 +206,163 @@ class SubmitReviewDialog(ModalScreen[SubmitResult | None]):
 
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
-        "Moving around",
+        "Inbox",
+        [
+            ("j k ↓ ↑", "move"),
+            ("↵", "review the pull request (on a stack: unfold / fold it)"),
+            ("→ ← l h", "unfold / fold a stack"),
+            ("tab shift+tab", "next / previous tab"),
+            ("/", "filter the list"),
+            ("0-9", "type a pull request number (or paste a URL) and press ↵"),
+            ("esc", "clear the filter"),
+            ("s", "oldest first / newest first"),
+            ("i", "ignore the pull request (in the Ignored tab: bring it back)"),
+            ("a", "this repository / all repositories"),
+            ("o", "open in the browser"),
+            ("r R", "refresh"),
+            ("@", "nickname for the author"),
+            ("q", "quit"),
+        ],
+    ),
+    (
+        "Moving around a pull request",
         [
             ("j k ↓ ↑", "line down / up"),
-            ("space ctrl+f / ctrl+b", "page down / up"),
-            ("ctrl+d / ctrl+u", "half page down / up"),
-            ("g G", "top / bottom"),
+            ("space ctrl+f", "page down (also pagedown)"),
+            ("ctrl+b", "page up (also pageup)"),
+            ("ctrl+d ctrl+u", "half page down / up"),
+            ("g G", "top / bottom (also home / end)"),
             ("} {", "next / previous change"),
             ("] [", "next / previous file"),
             ("n N", "next / previous comment thread"),
             ("u U", "next / previous unresolved thread"),
-            ("h l", "left / right side (side-by-side view)"),
+            ("h l", "left / right side (side by side)"),
             ("/", "search the changed lines…"),
-            ("f", "go to file…"),
-            ("tab", "switch between file tree and diff"),
+            ("f ctrl+k", "go to a file…"),
+            ("1 2", "files / conversation"),
+            ("tab", "between the file tree and the diff"),
+        ],
+    ),
+    (
+        "File tree",
+        [
+            ("j k", "move (the diff follows)"),
+            ("↵ l", "open the file"),
+            ("h", "fold the folder / go to its parent"),
+            ("space", "fold / unfold a folder"),
         ],
     ),
     (
         "Commenting",
         [
-            ("c or ↵", "comment on the line (or the file, on its header)"),
-            ("V", "select a range of lines, then c"),
-            ("s", "suggest a change to the selected lines"),
-            ("r", "reply to the thread"),
-            ("x", "resolve / unresolve the thread (or conversation comment)"),
+            ("c ↵", "comment on the line (on a file header: on the file)"),
+            ("V", "select lines, then c or s (esc clears)"),
+            ("s", "suggest a change"),
+            ("r", "reply"),
+            ("x", "resolve / unresolve"),
             ("e", "edit your comment"),
             ("d", "delete your comment"),
             ("+", "react with an emoji"),
             ("i", "ignore comments like this one…"),
-            ("z", "fold / unfold thread (or file)"),
+            ("z ↵", "fold / unfold a thread (or a file, on its header)"),
         ],
     ),
     (
         "Reviewing",
         [
-            ("v", "mark file as viewed (and move on)"),
-            ("T", "mark all test files viewed & hide them (again: show)"),
-            ("X", "mark all generated files viewed & hide them"),
+            ("v", "mark the file viewed and move on"),
+            ("T X", "show test / generated files; again: hide them and mark viewed"),
+            ("L", "only the changes since your last review"),
+            ("E", "expand the whole file"),
+            ("|", "side by side / unified"),
             ("S", "submit review…"),
             ("A", "approve…"),
             ("C", "comment on the pull request"),
-            ("1 2", "files / conversation"),
-            ("|", "toggle side-by-side view"),
-            ("E", "expand the whole file"),
-            ("L", "only the changes since your last review"),
-            ("t", "toggle the file tree"),
-            ("< >", "narrower / wider file tree (remembered)"),
+            ("R", "refresh (applies changes noticed on GitHub)"),
             ("o", "open in the browser"),
-            ("y", "copy file path and line"),
-            ("R", "refresh from GitHub"),
-            ("@", "nicknames for people"),
-            (",", "settings"),
-            ("ctrl+p", "command palette (themes and more)"),
-            ("q", "back to inbox / quit"),
+            ("y", "copy path:line"),
+            ("t", "hide / show the file tree"),
+            ("< >", "narrower / wider file tree"),
         ],
     ),
     (
-        "In the editor",
+        "Conversation",
         [
-            ("ctrl+s", "add to review (or save)"),
-            ("ctrl+g", "comment immediately (when no review is pending)"),
+            ("j k g G", "move between entries"),
+            ("↵ z", "on a thread: jump to the code; otherwise fold"),
+            ("r", "reply (quoting a comment)"),
+            ("x", "resolve / unresolve"),
+            ("e d + i", "edit · delete · react · ignore"),
+            ("C", "comment on the pull request"),
+        ],
+    ),
+    (
+        "Writing a comment",
+        [
+            ("ctrl+s", "add to your review (or save)"),
+            ("ctrl+g", "comment right away (when no review is pending)"),
             ("ctrl+t", "insert a suggested change"),
-            ("ctrl+o", "write in $EDITOR"),
-            ("esc", "cancel (your draft is kept)"),
+            ("ctrl+o", "write it in $EDITOR"),
+            ("esc", "cancel (the draft is kept)"),
+        ],
+    ),
+    (
+        "Everywhere",
+        [
+            (",", "settings"),
+            ("@", "nicknames for the people in view"),
+            ("ctrl+p", "command palette: every action, themes"),
+            ("?", "this help"),
+            ("q", "back to the inbox / quit"),
+            ("ctrl+q", "quit"),
         ],
     ),
 ]
+
+KEY_DISPLAY = {
+    "right_curly_bracket": "}",
+    "left_curly_bracket": "{",
+    "right_square_bracket": "]",
+    "left_square_bracket": "[",
+    "vertical_line": "|",
+    "question_mark": "?",
+    "slash": "/",
+    "at": "@",
+    "comma": ",",
+    "plus": "+",
+    "less_than_sign": "<",
+    "greater_than_sign": ">",
+    "escape": "esc",
+    "enter": "↵",
+    "down": "↓",
+    "up": "↑",
+    "left": "←",
+    "right": "→",
+}
+
+
+def display_key(key: str) -> str:
+    return KEY_DISPLAY.get(key, key)
+
+
+def help_markdown() -> str:
+    """The key reference as markdown tables (the README's "Keys" section is generated
+    from this, so the app and the README can't disagree)."""
+    blocks = []
+    for title, rows in HELP_SECTIONS:
+        lines = [f"| {title} | |", "| --- | --- |"]
+        for keys, description in rows:
+            shown = " ".join(f"`{key}`" for key in keys.split()).replace("`|`", "`\\|`")
+            lines.append(f"| {shown} | {description} |")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + "\n"
 
 
 class HelpScreen(ModalScreen[None]):
     DEFAULT_CSS = """
     HelpScreen { align: center middle; background: $background 60%; }
     HelpScreen > VerticalScroll {
-        width: 96; max-width: 96%; height: auto; max-height: 92%;
+        width: 110; max-width: 96%; height: auto; max-height: 94%;
         background: $surface; border: round $primary; padding: 0 2;
         border-title-style: bold;
     }
@@ -288,19 +372,32 @@ class HelpScreen(ModalScreen[None]):
         Binding("escape,q,question_mark", "close", "Close", show=False),
     ]
 
+    def __init__(self, first: str | None = None) -> None:
+        super().__init__()
+        self.first = first  # the section to show first (e.g. "Inbox")
+
     def compose(self) -> ComposeResult:
         with VerticalScroll() as scroll:
             scroll.border_title = "revv keys"
-            scroll.border_subtitle = "esc to close"
+            scroll.border_subtitle = "esc to close · , settings · ctrl+p every action"
             yield Static(self._table())
 
+    def _sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        sections = list(HELP_SECTIONS)
+        if self.first:
+            sections.sort(key=lambda section: section[0] != self.first)
+        elif sections and sections[0][0] == "Inbox":
+            sections.append(sections.pop(0))  # in a pull request, the inbox comes last
+        return sections
+
     def _table(self) -> Table:
-        grid = Table.grid(padding=(0, 2), expand=True)
+        grid = Table.grid(padding=(0, 3), expand=True)
         grid.add_column()
         grid.add_column()
-        halves = [HELP_SECTIONS[:2], HELP_SECTIONS[2:]]
+        sections = self._sections()
+        middle = (len(sections) + 1) // 2
         cells = []
-        for half in halves:
+        for half in (sections[:middle], sections[middle:]):
             table = Table.grid(padding=(0, 1))
             table.add_column(style="bold", no_wrap=True)
             table.add_column()

@@ -40,7 +40,7 @@ from revv.inbox import (
 )
 from revv.models import PRRef, PRSummary, RepoRef
 from revv.targets import parse_pr_ref
-from revv.ui.dialogs import NicknameDialog
+from revv.ui.dialogs import HelpScreen, NicknameDialog
 from revv.ui.palette import Palette
 from revv.ui.render import relative_time
 from revv.ui.widgets import CHECK_MARKS, DECISIONS, StatusBar, tone
@@ -757,9 +757,4 @@ class InboxScreen(Screen):
             self.notify("Nickname saved", timeout=1.5)
 
     def action_help(self) -> None:
-        self.notify(
-            "enter: review · type a number or URL to open any PR · tab: switch section · "
-            "s: sort · i: ignore · a: all repos · o: browser · r: refresh · @: nicknames · q: quit",
-            title="Inbox",
-            timeout=6,
-        )
+        self.app.push_screen(HelpScreen(first="Inbox"))

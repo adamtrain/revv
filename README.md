@@ -98,33 +98,108 @@ writes it in your `$EDITOR`, and `esc` cancels, keeping your draft for next time
 
 ## Keys
 
-Press `?` for the full list, `ctrl+p` for the command palette.
+Press `?` in the app for this list, `,` for the settings, and `ctrl+p` for the command
+palette.
 
-| Moving around | |
+<!-- keys -->
+
+| Inbox | |
 | --- | --- |
-| `j` `k` · `space` `ctrl+b` · `g` `G` | line · page · top and bottom |
-| `}` `{` · `]` `[` | next / previous change · file |
-| `n` `N` · `u` `U` | next / previous thread · unresolved thread |
-| `/` · `f` | search the changed lines · go to a file |
-| `1` · `2` | files · conversation |
+| `j` `k` `↓` `↑` | move |
+| `↵` | review the pull request (on a stack: unfold / fold it) |
+| `→` `←` `l` `h` | unfold / fold a stack |
+| `tab` `shift+tab` | next / previous tab |
+| `/` | filter the list |
+| `0-9` | type a pull request number (or paste a URL) and press ↵ |
+| `esc` | clear the filter |
+| `s` | oldest first / newest first |
+| `i` | ignore the pull request (in the Ignored tab: bring it back) |
+| `a` | this repository / all repositories |
+| `o` | open in the browser |
+| `r` `R` | refresh |
+| `@` | nickname for the author |
+| `q` | quit |
+
+| Moving around a pull request | |
+| --- | --- |
+| `j` `k` `↓` `↑` | line down / up |
+| `space` `ctrl+f` | page down (also pagedown) |
+| `ctrl+b` | page up (also pageup) |
+| `ctrl+d` `ctrl+u` | half page down / up |
+| `g` `G` | top / bottom (also home / end) |
+| `}` `{` | next / previous change |
+| `]` `[` | next / previous file |
+| `n` `N` | next / previous comment thread |
+| `u` `U` | next / previous unresolved thread |
+| `h` `l` | left / right side (side by side) |
+| `/` | search the changed lines… |
+| `f` `ctrl+k` | go to a file… |
+| `1` `2` | files / conversation |
+| `tab` | between the file tree and the diff |
+
+| File tree | |
+| --- | --- |
+| `j` `k` | move (the diff follows) |
+| `↵` `l` | open the file |
+| `h` | fold the folder / go to its parent |
+| `space` | fold / unfold a folder |
+
+| Commenting | |
+| --- | --- |
+| `c` `↵` | comment on the line (on a file header: on the file) |
+| `V` | select lines, then c or s (esc clears) |
+| `s` | suggest a change |
+| `r` | reply |
+| `x` | resolve / unresolve |
+| `e` | edit your comment |
+| `d` | delete your comment |
+| `+` | react with an emoji |
+| `i` | ignore comments like this one… |
+| `z` `↵` | fold / unfold a thread (or a file, on its header) |
 
 | Reviewing | |
 | --- | --- |
-| `c` or `↵` · `V` then `c` · `s` | comment on a line (or a file header) · on a range · suggest a change |
-| `r` · `x` · `e` · `d` · `+` | reply · resolve · edit · delete · react |
-| `i` | ignore comments like this one (by author, by words, or both) |
-| `v` | mark the file viewed and go to the next one |
-| `T` · `X` | show test files · generated files (they start hidden); again: hide and mark viewed |
+| `v` | mark the file viewed and move on |
+| `T` `X` | show test / generated files; again: hide them and mark viewed |
 | `L` | only the changes since your last review |
-| `S` · `A` · `C` | submit review · approve · comment on the pull request |
-| `R` · `o` · `y` | refresh · open in the browser · copy `path:line` |
+| `E` | expand the whole file |
+| `\|` | side by side / unified |
+| `S` | submit review… |
+| `A` | approve… |
+| `C` | comment on the pull request |
+| `R` | refresh (applies changes noticed on GitHub) |
+| `o` | open in the browser |
+| `y` | copy path:line |
+| `t` | hide / show the file tree |
+| `<` `>` | narrower / wider file tree |
+
+| Conversation | |
+| --- | --- |
+| `j` `k` `g` `G` | move between entries |
+| `↵` `z` | on a thread: jump to the code; otherwise fold |
+| `r` | reply (quoting a comment) |
+| `x` | resolve / unresolve |
+| `e` `d` `+` `i` | edit · delete · react · ignore |
+| `C` | comment on the pull request |
+
+| Writing a comment | |
+| --- | --- |
+| `ctrl+s` | add to your review (or save) |
+| `ctrl+g` | comment right away (when no review is pending) |
+| `ctrl+t` | insert a suggested change |
+| `ctrl+o` | write it in $EDITOR |
+| `esc` | cancel (the draft is kept) |
 
 | Everywhere | |
 | --- | --- |
-| `\|` · `E` · `t` · `<` `>` | side by side · expand the whole file · hide the file tree · resize it |
-| `@` | nicknames for the people in view |
 | `,` | settings |
-| `q` | back to the inbox (or quit) |
+| `@` | nicknames for the people in view |
+| `ctrl+p` | command palette: every action, themes |
+| `?` | this help |
+| `q` | back to the inbox / quit |
+| `ctrl+q` | quit |
+
+<!-- /keys -->
 
 ## Settings
 

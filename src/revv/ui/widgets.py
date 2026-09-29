@@ -220,6 +220,8 @@ class StatusBar(Widget):
         right = Text()
         if self.location:
             right.append(self.location + "  ", p.style(p.faint))
+        right.append(" , ", p.style(p.accent_fg, p.mix(p.accent, 0.12, p.panel), bold=True))
+        right.append(" settings  ", p.style(p.muted))
         right.append(" ? ", p.style(p.accent_fg, p.mix(p.accent, 0.12, p.panel), bold=True))
         right.append(" help", p.style(p.muted))
         width = self.content_region.width or 80
