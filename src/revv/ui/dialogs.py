@@ -14,6 +14,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RadioButton, RadioSet, Static, TextArea
 
+from revv.filters import CommentRule, words
 from revv.models import REACTION_EMOJI, PullRequest, ReviewEvent
 
 
@@ -232,6 +233,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("e", "edit your comment"),
             ("d", "delete your comment"),
             ("+", "react with an emoji"),
+            ("i", "ignore comments like this one…"),
             ("z", "fold / unfold thread (or file)"),
         ],
     ),
@@ -439,6 +441,94 @@ class ReactionPicker(ModalScreen[str | None]):
 
     def action_pick(self, index: int) -> None:
         self.dismiss(self.contents[index])
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class IgnoreCommentDialog(ModalScreen[CommentRule | None]):
+    """Choose how to ignore comments like the highlighted one."""
+
+    DEFAULT_CSS = """
+    IgnoreCommentDialog { align: center middle; background: $background 55%; }
+    IgnoreCommentDialog > Vertical {
+        width: 84; max-width: 95%; height: auto; max-height: 90%;
+        background: $surface; border: round $primary; padding: 0 1;
+        border-title-style: bold;
+    }
+    IgnoreCommentDialog #excerpt { margin: 1 0; height: auto; color: $text-muted; }
+    IgnoreCommentDialog RadioSet { width: 100%; margin-bottom: 1; }
+    IgnoreCommentDialog Input { margin-bottom: 0; }
+    IgnoreCommentDialog #ignore-hint { color: $text-muted; height: auto; margin: 0 0 1 1; }
+    IgnoreCommentDialog #ignore-buttons { height: auto; margin-bottom: 1; }
+    IgnoreCommentDialog #ignore-buttons Button { margin-right: 2; }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("ctrl+s", "confirm", "Ignore", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
+
+    def __init__(self, author: str, body: str) -> None:
+        super().__init__()
+        self.author = author
+        self.body = body
+
+    def compose(self) -> ComposeResult:
+        excerpt = " ".join(self.body.split())
+        suggestion = " ".join(words(self.body)[:6])
+        with Vertical() as box:
+            box.border_title = "Ignore comments like this one"
+            yield Static(
+                Text.assemble(
+                    (f"@{self.author}: ", "bold"),
+                    (f"“{excerpt[:220]}{'…' if len(excerpt) > 220 else ''}”", "italic"),
+                ),
+                id="excerpt",
+            )
+            with RadioSet(id="kind"):
+                yield RadioButton(f"Everything from @{self.author}", name="author")
+                yield RadioButton("Anything containing the words below", name="text")
+                yield RadioButton(
+                    f"From @{self.author}, containing the words below", name="both", value=True
+                )
+            yield Input(suggestion, placeholder="words to look for", id="words")
+            yield Static(
+                "Case and punctuation don't matter; the words must appear in this order "
+                "(words may be the start of longer ones). Change or remove rules in settings (,).",
+                id="ignore-hint",
+            )
+            with Horizontal(id="ignore-buttons"):
+                yield Button("Ignore (ctrl+s)", variant="primary", id="confirm")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one(RadioSet).focus()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm":
+            self.action_confirm()
+        else:
+            self.dismiss(None)
+
+    @on(Input.Submitted)
+    def submitted(self) -> None:
+        self.action_confirm()
+
+    def action_confirm(self) -> None:
+        pressed = self.query_one(RadioSet).pressed_button
+        kind = pressed.name if pressed is not None else "both"
+        text = self.query_one(Input).value.strip()
+        if kind in ("text", "both") and not text:
+            self.notify("Enter some words to look for", severity="warning")
+            return
+        if kind == "author":
+            self.dismiss(CommentRule(author=self.author))
+        elif kind == "text":
+            self.dismiss(CommentRule(text=text))
+        else:
+            self.dismiss(CommentRule(author=self.author, text=text))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

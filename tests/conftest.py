@@ -1,6 +1,6 @@
 import pytest
 
-from revv import config
+from revv import config, filters
 from revv.demo import DEMO_REF, DemoBackend
 from revv.ui.app import RevvApp
 
@@ -11,6 +11,7 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setattr(config, "_nicknames", None)
+    filters.reload()
 
 
 @pytest.fixture

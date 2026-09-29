@@ -30,6 +30,7 @@ from revv.config import (
     setting,
     update_nicknames,
 )
+from revv.filters import ignores
 from revv.inbox import (
     InboxSection,
     carry_over_details,
@@ -333,7 +334,7 @@ class InboxScreen(Screen):
                 item.head_ref,
                 item.ref.repo.full_name,
                 *item.requested_teams,
-                *(label.name for label in item.labels),
+                *(label.name for label in ignores().labels(item.labels)),
             ]
         ).lower()
         return all(word in haystack for word in query.lower().split())
@@ -526,7 +527,7 @@ class InboxScreen(Screen):
                 )
         if item.stack_size > 1 and entry.stack is None:
             detail.append(f"  ▤ stack #{item.stack_number}", p.style(p.accent_fg))
-        for label in item.labels[:4]:
+        for label in ignores().labels(item.labels)[:4]:
             detail.append("  ")
             detail.append_text(self._label(label.name, label.color, p))
 

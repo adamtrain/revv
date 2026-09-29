@@ -22,8 +22,10 @@ from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
 
+from revv import filters
 from revv.classify import GitAttributes
 from revv.diff import DiffLine, LineKind
+from revv.filters import ignores
 from revv.highlight import display_text
 from revv.models import ChangedFile, Comment, FileStatus, PullRequest, ReviewThread, Side
 from revv.ui.diffmodel import MAX_WRAP_ROWS, FileSection, Geometry, Row, RowKind, build_rows
@@ -226,7 +228,10 @@ class DiffView(ScrollView, can_focus=True):
         orphans = (
             []
             if self.since_mode  # that view deliberately shows only part of the files
-            else sorted({t.path for t in pr.threads if t.path not in changed}, key=str.lower)
+            else sorted(
+                {t.path for t in ignores().threads(pr.threads) if t.path not in changed},
+                key=str.lower,
+            )
         )
         files = [*pr.files, *(ChangedFile(path, FileStatus.UNCHANGED) for path in orphans)]
         for index, file in enumerate(files):
@@ -250,7 +255,7 @@ class DiffView(ScrollView, can_focus=True):
         if self.pr is None:
             return
         by_path: dict[str, list[ReviewThread]] = {}
-        for thread in self.pr.threads:
+        for thread in ignores().threads(self.pr.threads):  # ignored comments don't exist
             by_path.setdefault(thread.path, []).append(thread)
         for section in self.sections:
             threads = by_path.get(section.path, [])
@@ -285,7 +290,15 @@ class DiffView(ScrollView, can_focus=True):
         geo = self._geo or self._geometry()
         _, width = geo.thread_box(side)
         collapsed = self._thread_collapsed(thread)
-        key = (thread.id, thread.rev, width, focused, collapsed, len(thread.comments))
+        key = (
+            thread.id,
+            thread.rev,
+            width,
+            focused,
+            collapsed,
+            len(thread.comments),
+            filters.version,
+        )
         rendered = self._thread_cache.get(key)
         if rendered is None:
             assert self.pr is not None

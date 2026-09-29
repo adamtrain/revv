@@ -833,3 +833,63 @@ async def test_a_stack_with_one_pull_request_here_is_a_plain_row(backend: DemoBa
         stack_rows = [r for r in rows if r.item.ref.number == 44]
         assert len(stack_rows) == 1 and isinstance(stack_rows[0], Entry)
         assert stack_rows[0].stack is None
+
+
+async def test_ignoring_comments_and_labels(app: RevvApp, backend: DemoBackend) -> None:
+    from textual.widgets import Input as TextInput
+    from textual.widgets import RadioButton
+
+    from revv import filters
+    from revv.ui.settings import SettingsScreen
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("2")
+        await pilot.pause()
+        bot = next(
+            c
+            for c in screen.query(Card)
+            if c.item.kind == "comment" and getattr(c.item.obj, "author", "") == "ci-bot"
+        )
+        bot.focus()
+        await pilot.press("i")
+        await pilot.pause()
+        dialog = app.screen
+        next(b for b in dialog.query(RadioButton) if b.name == "author").value = True
+        await pilot.press("ctrl+s")
+        await pilot.pause(0.2)
+        assert filters.ignores().rules == [filters.CommentRule(author="ci-bot")]
+        assert not any(
+            getattr(c.item.obj, "author", "") == "ci-bot"
+            for c in screen.query(Card)
+            if c.item.kind == "comment"
+        )
+        # a thread whose only comment matches disappears everywhere, and so does its count
+        threads_before = len([s for s in screen.diff.sections for _ in s.threads])
+        filters.add_comment_rule(filters.CommentRule(author="hubot", text="docs look good"))
+        screen.refresh_filters()
+        await pilot.pause()
+        assert len([s for s in screen.diff.sections for _ in s.threads]) == threads_before - 1
+        # a new comment from an ignored bot doesn't count as a change
+        backend._pr.comments.append(backend._comment("ci-bot", "Coverage went up", 0, review=False))
+        screen.check_for_changes()
+        await pilot.pause(0.3)
+        assert not screen.query_one("#banner").display
+        # labels: set in the settings screen
+        await pilot.press("comma")
+        await pilot.pause(0.2)
+        settings = app.screen
+        assert isinstance(settings, SettingsScreen)
+        settings.query_one("#ignored-labels", TextInput).value = "network*"
+        await pilot.pause()
+        assert filters.ignores().label_ignored("networking")
+        assert [label.name for label in filters.ignores().labels(screen.pr.labels)] == [
+            "enhancement"
+        ]
+        rules = list(settings.query(".remove-rule"))
+        assert len(rules) == 2
+        await pilot.click(rules[0])
+        await pilot.pause(0.2)
+        assert filters.ignores().rules == [
+            filters.CommentRule(author="hubot", text="docs look good")
+        ]

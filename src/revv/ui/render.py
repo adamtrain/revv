@@ -16,6 +16,7 @@ from rich.theme import Theme as RichTheme
 from textual.strip import Strip
 
 from revv.config import display_name
+from revv.filters import ignores
 from revv.highlight import display_text
 from revv.models import Comment, ReviewThread
 from revv.ui.palette import Palette
@@ -255,14 +256,15 @@ class ThreadRenderer:
         edge_style = p.style(edge, bg)
         width = max(20, width)
 
+        comments = ignores().comments(thread.comments) or thread.comments
         if collapsed:
-            return RenderedThread([self._collapsed(thread, width, edge_style)], [thread.root])
+            return RenderedThread([self._collapsed(thread, width, edge_style)], [comments[0]])
 
         strips: list[Strip] = []
         owners: list[Comment | None] = []
         inner = width - 4
         status = self._status(thread)
-        for index, comment in enumerate(thread.comments):
+        for index, comment in enumerate(comments):
             corner = "╭─" if index == 0 else "├─"
             header = self._header(
                 comment, pr_author, corner, edge_style, width, right=status if index == 0 else None
@@ -278,7 +280,7 @@ class ThreadRenderer:
                 owners.append(comment)
         footer_hint = Text(f" {hints} ", p.style(p.muted, bg)) if hints and focused else None
         strips.append(self._rule(Text("╰─", edge_style), footer_hint, edge_style, width))
-        owners.append(thread.comments[-1] if thread.comments else None)
+        owners.append(comments[-1] if comments else None)
         return RenderedThread(strips, owners)
 
     def _status(self, thread: ReviewThread) -> Text | None:
@@ -315,7 +317,8 @@ class ThreadRenderer:
     def _collapsed(self, thread: ReviewThread, width: int, edge_style: Style) -> Strip:
         p = self.p
         bg = p.thread_bg
-        root = thread.root
+        visible = ignores().comments(thread.comments) or thread.comments
+        root = visible[0] if visible else None
         text = Text("╶ ▸ ", edge_style)
         if thread.is_resolved:
             text.append("✓ resolved", p.style(p.add_fg, bg))
@@ -333,7 +336,7 @@ class ThreadRenderer:
             text.append(": ", p.style(p.faint, bg))
             first = " ".join(SUGGESTION_RE.sub("[suggestion] ", root.body).split())
             text.append(first, p.style(p.muted, bg, italic=True))
-        count = len(thread.comments)
+        count = len(visible)
         suffix = Text(f"  {count} comment{'s' if count != 1 else ''} ", p.style(p.faint, bg))
         text.truncate(max(1, width - suffix.cell_len), overflow="ellipsis")
         text.append_text(suffix)

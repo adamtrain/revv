@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
-from revv import panc
+from revv import filters, panc
 from revv.cache import default_cache_dir
 from revv.config import config_path, ignored_prs, save_config, set_nicknames, setting
 from revv.ui.dialogs import NicknameDialog
@@ -62,6 +62,10 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen .row Input { width: 14; }
     SettingsScreen .row Button { min-width: 14; }
     SettingsScreen .note { color: $text-muted; padding: 0 0 0 1; height: auto; }
+    SettingsScreen #ignored-labels { width: 30; }
+    SettingsScreen #rules { height: auto; }
+    SettingsScreen #add-rule Input { width: 1fr; }
+    SettingsScreen #add-rule #rule-author { width: 20; }
     SettingsScreen #footer-note { color: $text-muted; margin: 1 0; height: auto; }
     """
 
@@ -112,6 +116,21 @@ class SettingsScreen(ModalScreen[None]):
                     yield Label(f"Ignored pull requests: {len(ignored_prs())}", id="ignored-label")
                     yield Button("Unignore all", id="clear-ignored")
 
+                yield Static("Ignoring", classes="heading")
+                with Horizontal(classes="row"):
+                    yield Label("Labels to ignore (comma-separated, * matches anything)")
+                    yield Input(
+                        ", ".join(filters.ignores().label_patterns),
+                        placeholder="e.g. wip, size/*",
+                        id="ignored-labels",
+                    )
+                yield Static("Comments to ignore (i on a comment adds one too):", classes="note")
+                yield Vertical(id="rules")
+                with Horizontal(classes="row", id="add-rule"):
+                    yield Input(placeholder="from (login)", id="rule-author")
+                    yield Input(placeholder="containing these words", id="rule-text")
+                    yield Button("Add", id="add-rule-button")
+
                 yield Static("People", classes="heading")
                 with Horizontal(classes="row"):
                     yield Label(self._nickname_label(), id="nickname-label")
@@ -148,6 +167,60 @@ class SettingsScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.measure_cache()
+        self._show_rules()
+
+    def _show_rules(self) -> None:
+        container = self.query_one("#rules", Vertical)
+        container.remove_children()
+        rules = filters.ignores().rules
+        if not rules:
+            container.mount(Static("  none yet", classes="note"))
+            return
+        for index, rule in enumerate(rules):
+            container.mount(
+                Horizontal(
+                    Label(f"  {rule.describe()}"),
+                    Button("Remove", name=str(index), classes="remove-rule"),
+                    classes="row",
+                )
+            )
+
+    def _filters_changed(self) -> None:
+        from revv.ui.inbox import InboxScreen
+        from revv.ui.review import ReviewScreen
+
+        for screen in self.app.screen_stack:
+            if isinstance(screen, ReviewScreen):
+                screen.refresh_filters()
+            elif isinstance(screen, InboxScreen):
+                screen._render_list()
+
+    @on(Input.Changed, "#ignored-labels")
+    def labels_changed(self, event: Input.Changed) -> None:
+        filters.set_ignored_labels(event.value.split(","))
+        self._filters_changed()
+
+    @on(Button.Pressed, "#add-rule-button")
+    def add_rule(self) -> None:
+        author = self.query_one("#rule-author", Input).value.strip().lstrip("@")
+        text = self.query_one("#rule-text", Input).value.strip()
+        if not author and not text:
+            self.notify("Enter a login, some words, or both", severity="warning", timeout=2)
+            return
+        filters.add_comment_rule(filters.CommentRule(author or None, text or None))
+        self.query_one("#rule-author", Input).value = ""
+        self.query_one("#rule-text", Input).value = ""
+        self._show_rules()
+        self._filters_changed()
+
+    @on(Button.Pressed, ".remove-rule")
+    def remove_rule(self, event: Button.Pressed) -> None:
+        rules = filters.ignores().rules
+        index = int(event.button.name or "-1")
+        if 0 <= index < len(rules):
+            filters.remove_comment_rule(rules[index])
+            self._show_rules()
+            self._filters_changed()
 
     @staticmethod
     def _switch(label: str, id: str, value: bool) -> Horizontal:

@@ -19,6 +19,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from revv.config import display_name
+from revv.filters import ignores
 from revv.models import AiCheck, Comment, PullRequest, Review, ReviewThread
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
@@ -164,7 +165,8 @@ class ConversationView(VerticalScroll):
         self.version += 1
         self.remove_children()
         widgets: list[Widget] = [Card(Item("description", pr), self)]
-        threads = [t for t in pr.threads]
+        shown = ignores()  # ignored comments (and threads made only of them) don't exist
+        threads = shown.threads(pr.threads)
         if threads:
             open_threads = [t for t in threads if not t.is_resolved]
             done = len(threads) - len(open_threads)
@@ -175,11 +177,11 @@ class ConversationView(VerticalScroll):
             order = sorted(threads, key=lambda t: (t.is_resolved, t.path, t.line or 0))
             widgets += [Card(Item("thread", t), self) for t in order]
         timeline: list[Item] = []
-        for comment in pr.comments:
+        for comment in shown.comments(pr.comments):
             expanded = self._expanded.get(comment.id, not comment.is_minimized)
             timeline.append(Item("comment", comment, expanded))
         for review in pr.reviews:
-            if review.state == "PENDING":
+            if review.state == "PENDING" or shown.review_hidden(review):
                 continue
             if not review.body.strip() and review.state == "COMMENTED":
                 continue  # just inline comments; they are listed as threads above
@@ -391,7 +393,7 @@ class ConversationView(VerticalScroll):
         header.append(display_name(pr.author), p.style(p.author_color(pr.author), p.bg, bold=True))
         header.append(f" opened this {relative_time(pr.created_at)}", p.style(p.muted, p.bg))
         right = Text()
-        for label in pr.labels[:4]:
+        for label in ignores().labels(pr.labels)[:4]:
             try:
                 from textual.color import Color
 
@@ -564,7 +566,8 @@ class ConversationView(VerticalScroll):
             text.append("● ", p.style(p.accent_fg, bg, bold=True))
         text.append(thread.path, p.style(p.text if not thread.is_resolved else p.muted, bg))
         text.append(f" {thread.line_label}", p.style(p.faint, bg))
-        root = thread.root
+        visible = ignores().comments(thread.comments) or thread.comments
+        root = visible[0] if visible else None
         if root is not None:
             text.append("  ")
             text.append(
@@ -573,7 +576,7 @@ class ConversationView(VerticalScroll):
             text.append(": ", p.style(p.faint, bg))
             excerpt = SUGGESTION_RE.sub("[suggestion] ", root.body)
             text.append(" ".join(excerpt.split()), p.style(p.muted, bg, italic=True))
-        count = len(thread.comments)
+        count = len(visible)
         suffix = Text(f"  {count} " + ("↵ jump " if focused else ""), p.style(p.faint, bg))
         text.truncate(max(1, width - suffix.cell_len), overflow="ellipsis")
         text.pad_right(max(0, width - text.cell_len - suffix.cell_len))

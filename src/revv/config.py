@@ -30,6 +30,8 @@ DEFAULTS: dict[str, Any] = {
     "sidebar_width": 34,  # columns of the file tree (< and > change it)
     "open_tab": "conversation",  # what a pull request opens on: "conversation" or "files"
     "panc": False,  # check PR descriptions for AI writing with panc (sends them to Pangram)
+    "ignored_labels": [],  # label patterns to treat as if they don't exist (`*` wildcards)
+    "ignored_comments": [],  # rules: {"author": ..., "text": ...}; see revv.filters
 }
 
 IGNORED_PR_TTL = 180 * 86400  # forget ignored pull requests after half a year

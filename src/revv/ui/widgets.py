@@ -7,6 +7,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 
 from revv.config import display_name
+from revv.filters import ignores
 from revv.models import AiCheck, PullRequest
 from revv.ui.palette import Palette
 from revv.ui.render import relative_time
@@ -99,7 +100,7 @@ class PRHeader(Widget):
             tabs.append("  ")
         for key, name, label in (
             ("1", "files", f"Files {len(pr.files)}"),
-            ("2", "conversation", f"Conversation {len(pr.comments) + len(pr.threads)}"),
+            ("2", "conversation", f"Conversation {self._conversation_count(pr)}"),
         ):
             active = self.tab == name
             key_style = p.style(p.bg, p.primary) if active else p.style(p.faint, p.panel)
@@ -135,7 +136,9 @@ class PRHeader(Widget):
 
         # 3: your review: progress, open threads, size; the pending review on the right
         progress = self._progress(pr, p)
-        unresolved = pr.unresolved_count
+        unresolved = sum(
+            1 for t in ignores().threads(pr.threads) if not t.is_resolved and not t.is_pending
+        )
         if unresolved:
             progress.append(
                 f"   ● {unresolved} open thread{'s' if unresolved != 1 else ''}",
@@ -155,6 +158,11 @@ class PRHeader(Widget):
         elif not pr.viewer_did_author:
             review.append("S review · A approve", p.style(p.faint))
         return Text("\n").join([line(title, tabs), line(who, status), line(progress, review)])
+
+    @staticmethod
+    def _conversation_count(pr: PullRequest) -> int:
+        shown = ignores()
+        return len(shown.comments(pr.comments)) + len(shown.threads(pr.threads))
 
     def _progress(self, pr: PullRequest, p: Palette) -> Text:
         """How much of the change has been viewed, weighted by changed lines."""

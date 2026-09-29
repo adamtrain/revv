@@ -112,6 +112,7 @@ Press `?` for the full list, `ctrl+p` for the command palette.
 | --- | --- |
 | `c` or `↵` · `V` then `c` · `s` | comment on a line (or a file header) · on a range · suggest a change |
 | `r` · `x` · `e` · `d` · `+` | reply · resolve · edit · delete · react |
+| `i` | ignore comments like this one (by author, by words, or both) |
 | `v` | mark the file viewed and go to the next one |
 | `T` · `X` | show test files · generated files (they start hidden); again: hide and mark viewed |
 | `L` | only the changes since your last review |
@@ -139,6 +140,22 @@ Press `,` to change any of these in the app; they're saved right away to
 | `inbox_sort` | `"asc"` | oldest first; `"desc"` for newest first |
 | `nicknames` | `{}` | GitHub login → the name you'd rather see (`@` sets them) |
 | `panc` | `false` | check descriptions for AI writing (below) |
+| `ignored_labels` | `[]` | labels treated as if they don't exist; `*` matches anything |
+| `ignored_comments` | `[]` | comments treated as if they don't exist (below) |
+
+### Ignoring comments and labels
+
+Ignored labels and comments are left out everywhere, as if they didn't exist, so a
+talkative bot doesn't clutter threads, counts or the "updated on GitHub" bar. Press `i` on
+a comment to ignore comments like it: everything from its author, anything containing
+some words, or both. Word matching ignores case and punctuation, and the words must
+appear in that order. Labels take patterns like `wip` or `size/*`. Both are listed and
+editable in the settings:
+
+```json
+"ignored_labels": ["wip", "size/*"],
+"ignored_comments": [{"author": "ci-bot"}, {"author": "mona", "text": "friendly reminder"}]
+```
 
 ### Test and generated files
 

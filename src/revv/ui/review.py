@@ -19,7 +19,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Static, Tree
 
-from revv import panc
+from revv import filters, panc
 from revv.classify import GitAttributes
 from revv.config import display_name, save_config, setting, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
@@ -40,6 +40,7 @@ from revv.ui.conversation import ConversationView, Item
 from revv.ui.dialogs import (
     ConfirmDialog,
     HelpScreen,
+    IgnoreCommentDialog,
     NicknameDialog,
     ReactionPicker,
     SubmitResult,
@@ -178,6 +179,7 @@ class ReviewScreen(Screen):
         Binding("less_than_sign", "sidebar_width(-4)", "Narrower tree", show=False),
         Binding("greater_than_sign", "sidebar_width(4)", "Wider tree", show=False),
         Binding("plus", "react", "React", show=False),
+        Binding("i", "ignore_comment", "Ignore comments like this", show=False),
         Binding("T", "hide_kind('test')", "Hide tests", show=False),
         Binding("X", "hide_kind('generated')", "Hide generated", show=False),
     ]
@@ -192,6 +194,9 @@ class ReviewScreen(Screen):
         self._save_timer = None
         self._last_write = 0.0
         self._checking = False
+        self._acknowledged: Fingerprint | None = (
+            None  # remote state known to change nothing visible
+        )
         self.ai_check: AiCheck | None = None  # panc's verdict on the description
         self.since: Review | None = None  # showing only the changes since this review
         self.since_files: list[ChangedFile] | None = None
@@ -1004,6 +1009,31 @@ class ReviewScreen(Screen):
             self.notify("Marked as resolved ✓" if resolve else "Unresolved", timeout=1.5)
         self.after_change(threads=False)
 
+    def action_ignore_comment(self) -> None:
+        if not self._ready():
+            return
+        target = self._current_comment()
+        if target is None:
+            self.notify("Move to a comment to ignore comments like it", timeout=2)
+            return
+        self.ignore_like(target)
+
+    @work(group="edit")
+    async def ignore_like(self, target: Comment | Review) -> None:
+        rule = await self.app.push_screen_wait(IgnoreCommentDialog(target.author, target.body))
+        if rule is None:
+            return
+        filters.add_comment_rule(rule)
+        self.refresh_filters()
+        self.notify(f"Ignoring {rule.describe()} · change it in settings (,)", timeout=4)
+
+    def refresh_filters(self) -> None:
+        """Re-show everything after the ignore rules changed."""
+        if not self.session.loaded:
+            return
+        self.diff._thread_cache.clear()
+        self._present(self.pr)
+
     def action_react(self) -> None:
         if not self._ready(write=True):
             return
@@ -1271,6 +1301,7 @@ class ReviewScreen(Screen):
             self._syncing = False
             self.header.syncing = False
             self.header.refresh()
+        self._acknowledged = None
         if self.since is not None:
             self.show_since_review(quiet=True)  # recompute against the new head
         else:
@@ -1425,9 +1456,22 @@ class ReviewScreen(Screen):
             remote = await session.fingerprint()
         except Exception:
             return  # offline for a moment; try again next time
-        if session.pr is None or self._syncing:
+        if self._syncing or remote == self._acknowledged:
             return
         changes = remote.changes_since(local)
+        if changes and filters.ignores().rules:
+            # Only announce what you'd actually see: compare with ignored comments left out.
+            try:
+                fresh = await session.backend.load_pull_request(session.ref, reuse=session.pr)
+            except Exception:
+                return
+            shown = filters.ignores()
+            changes = Fingerprint.of(shown.visible_pr(fresh)).changes_since(
+                Fingerprint.of(shown.visible_pr(session.pr))
+            )
+            if not changes:
+                self._acknowledged = remote  # nothing visible changed: don't look again
+                return
         if changes:
             self.show_banner("changed", ", ".join(changes))
 
