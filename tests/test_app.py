@@ -893,3 +893,22 @@ async def test_ignoring_comments_and_labels(app: RevvApp, backend: DemoBackend) 
         assert filters.ignores().rules == [
             filters.CommentRule(author="hubot", text="docs look good")
         ]
+
+
+async def test_refreshing_never_marks_default_hidden_files_viewed(
+    app: RevvApp, backend: DemoBackend
+) -> None:
+    """Test and generated files are hidden by default; refreshing must not mark them as
+    viewed on GitHub (only hiding them explicitly with T / X does that)."""
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("R")
+        await pilot.pause(0.3)
+        for path in ("tests/test_retry.py", "web/src/components/StatusBadge.test.tsx", "uv.lock"):
+            assert not backend._pr.file(path).is_viewed, path  # type: ignore[union-attr]
+        # after T (show) and T (hide + mark), newly refreshed test files do get marked
+        await pilot.press("T", "T")
+        await pilot.pause(0.3)
+        assert backend._pr.file("tests/test_retry.py").is_viewed  # type: ignore[union-attr]
+        assert not backend._pr.file("uv.lock").is_viewed  # type: ignore[union-attr]
+        assert screen.diff.hidden_kinds == {"test", "generated"}

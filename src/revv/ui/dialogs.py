@@ -319,6 +319,15 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ),
 ]
 
+# Only shown when the (opt-in) maintainer-teams extra is on.
+MAINTAINER_HELP: tuple[str, list[tuple[str, str]]] = (
+    "Maintainer teams",
+    [
+        ("m", "group files by maintainer team (yours first) / by folder"),
+        ("M", "only the files your teams maintain / everything"),
+    ],
+)
+
 KEY_DISPLAY = {
     "right_curly_bracket": "}",
     "left_curly_bracket": "{",
@@ -383,7 +392,11 @@ class HelpScreen(ModalScreen[None]):
             yield Static(self._table())
 
     def _sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        from revv.maintainers import maintainer_settings
+
         sections = list(HELP_SECTIONS)
+        if maintainer_settings() is not None:
+            sections.insert(-1, MAINTAINER_HELP)
         if self.first:
             sections.sort(key=lambda section: section[0] != self.first)
         elif sections and sections[0][0] == "Inbox":

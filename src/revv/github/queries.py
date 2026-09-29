@@ -277,6 +277,14 @@ mutation RemoveReaction($input: RemoveReactionInput!) {
 }
 """
 
+VIEWER_TEAMS = """
+query MyTeams($org: String!, $login: String!) {
+  organization(login: $org) {
+    teams(first: 100, userLogins: [$login]) { nodes { combinedSlug } }
+  }
+}
+"""
+
 # Cheap enough to poll: just enough to notice that a pull request changed.
 FINGERPRINT = """
 query Fingerprint($owner: String!, $name: String!, $number: Int!) {

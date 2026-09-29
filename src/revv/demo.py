@@ -794,7 +794,45 @@ class DemoBackend:
                 ],
             ),
         ]
+        maintainers = [
+            (
+                "acme/python-reviewers",
+                [
+                    "src/netkit/client.py",
+                    "src/netkit/retry.py",
+                    "src/netkit/legacy_backoff.py",
+                    "src/netkit/urls.py",
+                    "tests/test_retry.py",
+                    "pyproject.toml",
+                    "uv.lock",
+                ],
+            ),
+            (
+                "acme/web-platform",
+                ["web/src/components/StatusBadge.tsx", "web/src/components/StatusBadge.test.tsx"],
+            ),
+            ("acme/docs", ["README.md", "docs/architecture.png"]),
+        ]
+        maintainers_body = "\n".join(
+            [
+                "<!-- maintainers-comment -->",
+                "<details>",
+                "<summary>Maintainer teams for changed files</summary>",
+                "",
+                *[
+                    line
+                    for team, paths in maintainers
+                    for line in [
+                        f"`@{team}` maintains:",
+                        *[f"- [{path}]({DEMO_REF.web_url}/files)" for path in paths],
+                        "",
+                    ]
+                ],
+                "</details>",
+            ]
+        )
         comments = [
+            self._comment("developer-experience-ci-cd-app", maintainers_body, 47, review=False),
             self._comment(
                 "ci-bot",
                 "⚠️ Coverage decreased by **0.4%** (`netkit/client.py`).",
@@ -915,6 +953,10 @@ class DemoBackend:
                 )
             )
         return files
+
+    async def viewer_teams(self, org: str, login: str) -> list[str]:
+        await self._wait()
+        return ["acme/python-reviewers"] if org.lower() == "acme" else []
 
     async def fingerprint(self, ref: PRRef) -> Fingerprint:
         await self._wait()

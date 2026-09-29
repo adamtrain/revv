@@ -37,6 +37,10 @@ class Backend(Protocol):
         """Files (with patches) changed between two commits, e.g. since your last review."""
         ...
 
+    async def viewer_teams(self, org: str, login: str) -> list[str]:
+        """The teams ("org/slug") of an organization that `login` is a member of."""
+        ...
+
     async def fingerprint(self, ref: PRRef) -> Fingerprint:
         """A cheap summary of the pull request, polled to notice changes."""
         ...

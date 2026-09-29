@@ -78,9 +78,26 @@ class FileTree(Tree[FileSection | None]):
             if node.data is not None:
                 node.set_label(self.label_for(node.data))
 
-    def build(self, sections: list[FileSection]) -> None:
+    def build(
+        self,
+        sections: list[FileSection],
+        groups: list[tuple[Text, list[FileSection]]] | None = None,
+    ) -> None:
+        """Folders of files; or, with `groups`, a top-level node per group (e.g. per
+        maintainer team) with its files' folders inside."""
         self.clear()
         self._path_nodes.clear()
+        if groups is None:
+            self._add_folders(self.root, sections)
+        else:
+            for label, members in groups:
+                group = self.root.add(label, data=None, expand=True)
+                self._add_folders(group, members)
+        self.root.expand_all()
+
+    def _add_folders(
+        self, parent: TreeNode[FileSection | None], sections: list[FileSection]
+    ) -> None:
         tree: dict = {}
         for section in sections:
             node = tree
@@ -111,8 +128,7 @@ class FileTree(Tree[FileSection | None]):
                 leaf = parent.add_leaf(self.label_for(section), data=section)
                 self._path_nodes[section.path] = leaf
 
-        add(self.root, tree)
-        self.root.expand_all()
+        add(parent, tree)
 
     def label_for(self, section: FileSection) -> Text:
         p = self.palette

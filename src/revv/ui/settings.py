@@ -15,6 +15,7 @@ from textual.widgets import Button, Input, Label, Select, Static, Switch
 from revv import filters, panc
 from revv.cache import default_cache_dir
 from revv.config import config_path, ignored_prs, save_config, set_nicknames, setting
+from revv.maintainers import maintainer_settings
 from revv.ui.dialogs import NicknameDialog
 
 
@@ -131,6 +132,12 @@ class SettingsScreen(ModalScreen[None]):
                     yield Input(placeholder="containing these words", id="rule-text")
                     yield Button("Add", id="add-rule-button")
 
+                if maintainer_settings() is not None:
+                    yield Static("Maintainer teams (turned on in config.json)", classes="heading")
+                    with Horizontal(classes="row"):
+                        yield Label(self._teams_label(), id="teams-label")
+                        yield Button("Forget and re-check", id="forget-teams")
+
                 yield Static("People", classes="heading")
                 with Horizontal(classes="row"):
                     yield Label(self._nickname_label(), id="nickname-label")
@@ -225,6 +232,29 @@ class SettingsScreen(ModalScreen[None]):
     @staticmethod
     def _switch(label: str, id: str, value: bool) -> Horizontal:
         return Horizontal(Label(label), Switch(value=value, id=id), classes="row")
+
+    def _teams_label(self) -> str:
+        cache = getattr(self.app, "cache", None)
+        teams = cache.cached_teams() if cache is not None else []
+        settings = maintainer_settings()
+        extra = list(settings.my_teams) if settings else []
+        known = sorted({*teams, *extra}, key=str.lower)
+        if not known:
+            return "Your teams: not known yet (checked when a pull request opens)"
+        return "Your teams: " + ", ".join(known) + " (from GitHub, re-checked daily)"
+
+    @on(Button.Pressed, "#forget-teams")
+    def forget_teams(self) -> None:
+        cache = getattr(self.app, "cache", None)
+        if cache is not None:
+            cache.clear_teams()
+        from revv.ui.review import ReviewScreen
+
+        for screen in self.app.screen_stack:
+            if isinstance(screen, ReviewScreen):
+                screen.recheck_teams()
+        self.query_one("#teams-label", Label).update(self._teams_label())
+        self.notify("Forgot your cached teams; checking GitHub again", timeout=2)
 
     @staticmethod
     def _nickname_label() -> str:

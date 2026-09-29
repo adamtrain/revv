@@ -27,6 +27,7 @@ from revv.classify import GitAttributes
 from revv.diff import DiffLine, LineKind
 from revv.filters import ignores
 from revv.highlight import display_text
+from revv.maintainers import Ownership, short_team
 from revv.models import ChangedFile, Comment, FileStatus, PullRequest, ReviewThread, Side
 from revv.ui.diffmodel import MAX_WRAP_ROWS, FileSection, Geometry, Row, RowKind, build_rows
 from revv.ui.palette import Palette
@@ -162,6 +163,8 @@ class DiffView(ScrollView, can_focus=True):
         self.pending_jump: FileSection | None = None  # applied after the first real layout
         self.hidden_kinds: set[str] = set()  # e.g. {"test", "generated"}
         self.since_mode = False  # showing only the changes since your last review
+        self.ownership: Ownership | None = None  # maintainer teams (an opt-in extra)
+        self.only_mine = False  # show only files your teams maintain
         self.attributes: GitAttributes | None = None  # linguist-generated rules
         self.auto_split = True  # choose side-by-side on the first layout if there's room
 
@@ -199,7 +202,13 @@ class DiffView(ScrollView, can_focus=True):
         return self._thread_renderer
 
     def is_hidden(self, section: FileSection) -> bool:
-        return not section.force_visible and bool(section.kinds & self.hidden_kinds)
+        if section.force_visible:
+            return False
+        if section.kinds & self.hidden_kinds:
+            return True
+        return (
+            self.only_mine and self.ownership is not None and not self.ownership.mine(section.path)
+        )
 
     @property
     def visible_sections(self) -> list[FileSection]:
@@ -209,8 +218,11 @@ class DiffView(ScrollView, can_focus=True):
         counts: dict[str, int] = {}
         for section in self.sections:
             if self.is_hidden(section):
-                for kind in section.kinds & self.hidden_kinds:
+                kinds = section.kinds & self.hidden_kinds
+                for kind in kinds:
                     counts[kind] = counts.get(kind, 0) + 1
+                if not kinds:  # hidden because another team maintains it
+                    counts["others"] = counts.get("others", 0) + 1
         return counts
 
     def reclassify(self) -> None:
@@ -1037,6 +1049,13 @@ class DiffView(ScrollView, can_focus=True):
         if directory:
             text.append(directory + "/", p.style(p.muted, bg))
         text.append(name, p.style(p.text, bg, bold=True))
+        if self.ownership is not None:
+            for team in self.ownership.teams_for(file.path):
+                text.append("  ")
+                if self.ownership.is_mine(team):
+                    text.append(f" ★ {short_team(team)} ", p.style(p.bg, p.accent, bold=True))
+                else:
+                    text.append(f" {short_team(team)} ", p.style(p.muted, p.mix(p.fg, 0.08, bg)))
         right = Text("", base)
         if section.pending_count:
             right.append(f" ✎ {section.pending_count} pending ", p.style(p.warning_fg, bg))

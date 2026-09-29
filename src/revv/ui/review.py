@@ -23,6 +23,7 @@ from revv import filters, panc
 from revv.classify import GitAttributes
 from revv.config import display_name, save_config, setting, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
+from revv.maintainers import Ownership, find, maintainer_settings, short_team, team_key
 from revv.models import (
     REACTION_EMOJI,
     AiCheck,
@@ -176,6 +177,8 @@ class ReviewScreen(Screen):
         Binding("y", "copy_location", "Copy location", show=False),
         Binding("at", "nicknames", "Nicknames", show=False),
         Binding("L", "since_review", "Since last review", show=False),
+        Binding("m", "group_by_team", "Group by team", show=False),
+        Binding("M", "only_mine", "Only your teams' files", show=False),
         Binding("less_than_sign", "sidebar_width(-4)", "Narrower tree", show=False),
         Binding("greater_than_sign", "sidebar_width(4)", "Wider tree", show=False),
         Binding("plus", "react", "React", show=False),
@@ -198,6 +201,11 @@ class ReviewScreen(Screen):
             None  # remote state known to change nothing visible
         )
         self.ai_check: AiCheck | None = None  # panc's verdict on the description
+        self.ownership: Ownership | None = None  # maintainer teams (an opt-in extra)
+        settings = maintainer_settings()
+        self.group_by_team = settings.group_by_team if settings else True
+        self._teams_loaded = False
+        self._marked_kinds: set[str] = set()  # kinds hidden with T / X, which marks them viewed
         self.since: Review | None = None  # showing only the changes since this review
         self.since_files: list[ChangedFile] | None = None
 
@@ -267,15 +275,65 @@ class ReviewScreen(Screen):
         if isinstance(interval, int | float) and interval > 0:
             self.set_interval(max(10, interval), self.check_for_changes)
 
+    def _display_order(self, paths: list[str]) -> dict[str, int]:
+        """Where each file goes: by folder, or grouped by maintainer team (yours first)."""
+        folders = tree_order(paths)
+        ownership = self.ownership
+        if ownership is None or not self.group_by_team:
+            return {path: i for i, path in enumerate(folders)}
+        groups = {group: i for i, group in enumerate(ownership.group_order(paths))}
+        ranked = sorted(folders, key=lambda path: groups[ownership.group_of(path)])
+        return {path: i for i, path in enumerate(ranked)}
+
+    def _update_ownership(self, pr: PullRequest) -> None:
+        """Read the maintainers comment (if the feature is on) and your teams (cached)."""
+        settings = maintainer_settings()
+        found = find(pr.comments, settings) if settings else None
+        if found is None:
+            self.ownership = None
+        else:
+            known = self.ownership.my_teams if self.ownership else set()
+            known |= {team_key(t) for t in settings.my_teams} if settings else set()
+            self.ownership = Ownership(found, known)
+            if not self._teams_loaded:
+                self.load_my_teams()
+        self.diff.ownership = self.ownership
+        self.conversation.ownership = self.ownership
+
+    def recheck_teams(self) -> None:
+        """Look your teams up again (after the settings screen forgot the cached ones)."""
+        self._teams_loaded = False
+        if self.ownership is not None:
+            settings = maintainer_settings()
+            self.ownership.my_teams = (
+                {team_key(t) for t in settings.my_teams} if settings else set()
+            )
+            self.load_my_teams()
+
+    @work(group="teams")
+    async def load_my_teams(self) -> None:
+        ownership = self.ownership
+        if ownership is None:
+            return
+        self._teams_loaded = True
+        settings = maintainer_settings()
+        extra = settings.my_teams if settings else ()
+        teams = await self.session.my_teams(ownership.maintainers.orgs, extra)
+        if self.ownership is None or teams == self.ownership.my_teams:
+            return
+        self.ownership.my_teams = teams
+        self._present(self.pr)  # regroup: your teams come first
+
     def _present(self, pr: PullRequest, *, first: bool = False) -> None:
-        order = {path: i for i, path in enumerate(tree_order([f.path for f in pr.files]))}
+        self._update_ownership(pr)
+        order = self._display_order([f.path for f in pr.files])
         pr.files.sort(key=lambda f: order.get(f.path, 0))
         diff = self.diff
         self.files_pane.loading = False
         if self.since_files is not None:
             # the diff shows only what changed since your last review
             since = self.since_files
-            order = {path: i for i, path in enumerate(tree_order([f.path for f in since]))}
+            order = self._display_order([f.path for f in since])
             since.sort(key=lambda f: order.get(f.path, 0))
             diff.load(dataclasses.replace(pr, files=since), keep_state=not first)
         else:
@@ -305,8 +363,12 @@ class ReviewScreen(Screen):
 
     def rebuild_tree(self) -> None:
         diff = self.diff
-        self.file_tree.build(diff.visible_sections)
+        self.file_tree.build(diff.visible_sections, self._team_groups())
         self.header.hidden = {s.path for s in diff.sections if diff.is_hidden(s)}
+        ownership = self.ownership
+        self.header.mine = (
+            {f.path for f in self.pr.files if ownership.mine(f.path)} if ownership else None
+        )
         self.header.refresh()
         note = self.hidden_note
         counts = diff.hidden_counts()
@@ -315,7 +377,11 @@ class ReviewScreen(Screen):
             return
         p = Palette.from_app(self.app)
         text = Text()
-        for kind, key, label in (("test", "T", "test"), ("generated", "X", "generated")):
+        for kind, key, label in (
+            ("test", "T", "test"),
+            ("generated", "X", "generated"),
+            ("others", "M", "other teams'"),
+        ):
             count = counts.get(kind)
             if count:
                 if text:
@@ -324,6 +390,70 @@ class ReviewScreen(Screen):
                 text.append(f" · {key}", p.style(p.accent_fg, bold=True))
         note.update(text)
         note.display = True
+
+    def _team_groups(self) -> list[tuple[Text, list[FileSection]]] | None:
+        """The file tree's groups when grouping by maintainer team."""
+        ownership = self.ownership
+        if ownership is None or not self.group_by_team:
+            return None
+        sections = self.diff.visible_sections
+        p = Palette.from_app(self.app)
+        groups = []
+        for group in ownership.group_order(s.path for s in sections):
+            members = [s for s in sections if ownership.group_of(s.path) == group]
+            label = Text()
+            if group is None:
+                label.append("no maintainer listed", p.style(p.faint, bold=True))
+            elif ownership.is_mine(group):
+                label.append(f"★ {short_team(group)}", p.style(p.accent_fg, bold=True))
+                label.append(" your team", p.style(p.faint, italic=True))
+            else:
+                label.append(short_team(group), p.style(p.muted, bold=True))
+            label.append(f" {len(members)}", p.style(p.faint))
+            groups.append((label, members))
+        return groups
+
+    def action_group_by_team(self) -> None:
+        """m: group the files by maintainer team, or by folder."""
+        self.group_by_team = not self.group_by_team
+        raw = setting("maintainers")
+        if isinstance(raw, dict):
+            save_config(maintainers={**raw, "group_by_team": self.group_by_team})
+        self._present(self.pr)
+        self.notify(
+            "Grouped by maintainer team" if self.group_by_team else "Grouped by folder", timeout=1.5
+        )
+
+    def action_only_mine(self) -> None:
+        """M: show only the files your teams maintain (again: everything)."""
+        diff = self.diff
+        ownership = self.ownership
+        if ownership is None:
+            return
+        if not ownership.my_teams:
+            self.notify(
+                'revv doesn\'t know your teams: list them as "my_teams" in the maintainers config',
+                severity="warning",
+                timeout=5,
+            )
+            return
+        diff.only_mine = not diff.only_mine
+        for section in diff.sections:
+            section.force_visible = False
+        diff.relayout()
+        self.rebuild_tree()
+        self.update_status()
+        if diff.only_mine:
+            mine = [s for s in diff.sections if not diff.is_hidden(s)]
+            if mine:
+                diff.jump_to_section(mine[0])
+            self.notify(f"Showing your teams' {len(mine)} files (M shows everything)", timeout=2)
+        else:
+            self.notify("Showing every file", timeout=1.5)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # m / M only exist while the maintainer-teams extra has something to show
+        return not (action in ("group_by_team", "only_mine") and self.ownership is None)
 
     @work(group="attributes")
     async def load_attributes(self) -> None:
@@ -450,6 +580,10 @@ class ReviewScreen(Screen):
         self.diff.relayout()
         self.diff.jump_to_thread(message.thread)
         self.diff.focus()
+
+    @on(ConversationView.ShowFiles)
+    def show_files(self) -> None:
+        self.action_switch_tab("files")
 
     @on(ConversationView.Focused)
     def conversation_focused(self) -> None:
@@ -1177,6 +1311,7 @@ class ReviewScreen(Screen):
             return
         if kind in diff.hidden_kinds:
             diff.hidden_kinds.discard(kind)
+            self._marked_kinds.discard(kind)
             for section in matching:
                 section.force_visible = False
             diff.relayout()
@@ -1192,6 +1327,7 @@ class ReviewScreen(Screen):
         if not self._ready(write=True):
             return
         diff.hidden_kinds.add(kind)
+        self._marked_kinds.add(kind)
         for section in matching:
             section.force_visible = False
             section.collapsed = True
@@ -1228,9 +1364,11 @@ class ReviewScreen(Screen):
         return self.pr.file(section.path) or section.file
 
     def _mark_hidden_viewed(self) -> None:
-        """After a refresh, newly pushed files of a hidden kind get marked as viewed too."""
+        """After a refresh, newly pushed files of a kind you hid with T / X (which marks
+        them viewed) get marked as viewed too. Kinds that are merely hidden by default
+        are never marked: opening or refreshing a pull request doesn't write to GitHub."""
         diff = self.diff
-        for kind in diff.hidden_kinds:
+        for kind in diff.hidden_kinds & self._marked_kinds:
             stale = [s for s in diff.sections if kind in s.kinds and not s.file.is_viewed]
             if stale:
                 label, key = ("test", "T") if kind == "test" else ("generated", "X")
@@ -1459,7 +1597,7 @@ class ReviewScreen(Screen):
         if self._syncing or remote == self._acknowledged:
             return
         changes = remote.changes_since(local)
-        if changes and filters.ignores().rules:
+        if changes and filters.ignores().active:
             # Only announce what you'd actually see: compare with ignored comments left out.
             try:
                 fresh = await session.backend.load_pull_request(session.ref, reuse=session.pr)

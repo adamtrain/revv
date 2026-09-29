@@ -20,11 +20,12 @@ from textual.widgets import Static
 
 from revv.config import display_name
 from revv.filters import ignores
+from revv.maintainers import Ownership, short_team, team_key
 from revv.models import AiCheck, Comment, PullRequest, Review, ReviewThread
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
 
-ItemKind = Literal["description", "comment", "review", "thread"]
+ItemKind = Literal["description", "maintainers", "comment", "review", "thread"]
 
 REVIEW_VERBS = {
     "APPROVED": ("approved", "success"),
@@ -38,7 +39,7 @@ REVIEW_VERBS = {
 @dataclass(eq=False)
 class Item:
     kind: ItemKind
-    obj: PullRequest | Comment | Review | ReviewThread
+    obj: PullRequest | Comment | Review | ReviewThread | Ownership
     expanded: bool = True
 
     @property
@@ -50,6 +51,8 @@ class Item:
             return obj.created_at
         if isinstance(obj, PullRequest):
             return obj.created_at
+        if isinstance(obj, Ownership):
+            return datetime.min
         return obj.root.created_at if obj.root else datetime.min
 
 
@@ -119,6 +122,9 @@ class ConversationView(VerticalScroll):
             super().__init__()
             self.thread = thread
 
+    class ShowFiles(Message):
+        """Show the files (from the maintainer teams card)."""
+
     class Focused(Message):
         def __init__(self, item: Item) -> None:
             super().__init__()
@@ -132,6 +138,7 @@ class ConversationView(VerticalScroll):
         self._md: MarkdownRenderer | None = None
         self._expanded: dict[str, bool] = {}
         self.ai: AiCheck | None = None  # panc's verdict on the description
+        self.ownership: Ownership | None = None  # maintainer teams (an opt-in extra)
         self.ai_running = False
 
     def on_mount(self) -> None:
@@ -165,6 +172,8 @@ class ConversationView(VerticalScroll):
         self.version += 1
         self.remove_children()
         widgets: list[Widget] = [Card(Item("description", pr), self)]
+        if self.ownership is not None:
+            widgets.append(Card(Item("maintainers", self.ownership), self))
         shown = ignores()  # ignored comments (and threads made only of them) don't exist
         threads = shown.threads(pr.threads)
         if threads:
@@ -294,10 +303,13 @@ class ConversationView(VerticalScroll):
 
     def activate(self, card: Card) -> None:
         item = card.item
+        if item.kind == "maintainers":
+            self.post_message(self.ShowFiles())
+            return
         if item.kind == "thread":
             assert isinstance(item.obj, ReviewThread)
             self.post_message(self.JumpToThread(item.obj))
-        elif item.kind in ("comment", "review"):
+        elif isinstance(item.obj, (Comment, Review)):
             item.expanded = not item.expanded
             self._expanded[item.obj.id] = item.expanded
             card.invalidate()
@@ -311,6 +323,9 @@ class ConversationView(VerticalScroll):
         if item.kind == "description":
             assert isinstance(item.obj, PullRequest)
             return self._description(item.obj, width, focused)
+        if item.kind == "maintainers":
+            assert isinstance(item.obj, Ownership)
+            return self._maintainers(item.obj, width, focused)
         if item.kind == "review":
             assert isinstance(item.obj, Review)
             return self._review(item.obj, width, focused, item.expanded)
@@ -434,6 +449,51 @@ class ConversationView(VerticalScroll):
         body += self._reactions(pr, inner)
         body += self._ai_lines(inner)
         return self._box(header, body, width, self._edge(focused), right if right else None)
+
+    def _maintainers(self, ownership: Ownership, width: int, focused: bool) -> list[Strip]:
+        """Who maintains the changed files, as the bot comment says (it's hidden itself)."""
+        p = self.palette
+        bg = p.style(bg=p.bg)
+        inner = width - 4
+        pr = self.pr
+        paths = [f.path for f in pr.files] if pr else list(ownership.maintainers.teams_by_path)
+        requested = {team_key(t) for t in (pr.team_review_requests if pr else [])}
+        counts: dict[str | None, int] = {}
+        for path in paths:
+            for team in ownership.teams_for(path) or [None]:
+                counts[team] = counts.get(team, 0) + 1
+        order = sorted(
+            counts,
+            key=lambda t: (t is None, not (t and ownership.is_mine(t)), (t or "").lower()),
+        )
+        width_name = max((len(short_team(t)) if t else 20 for t in order), default=10) + 2
+        lines = []
+        for team in order:
+            count = counts[team]
+            text = Text()
+            if team is None:
+                text.append("  " + "no maintainer listed".ljust(width_name), p.style(p.faint, p.bg))
+            elif ownership.is_mine(team):
+                text.append(
+                    "★ " + short_team(team).ljust(width_name), p.style(p.accent_fg, p.bg, bold=True)
+                )
+            else:
+                text.append("  " + short_team(team).ljust(width_name), p.style(p.text, p.bg))
+            text.append(f"{count} file{'s' if count != 1 else ''}", p.style(p.muted, p.bg))
+            if team is not None and ownership.is_mine(team):
+                text.append(" · your team", p.style(p.accent_fg, p.bg, italic=True))
+            if team is not None and team_key(team) in requested:
+                text.append(" · review requested", p.style(p.warning_fg, p.bg))
+            lines.append(self._render_text(text, inner, bg))
+        if not ownership.my_teams:
+            hint = Text(
+                "  revv doesn't know your teams yet (list them as my_teams in the config)",
+                p.style(p.faint, p.bg, italic=True),
+            )
+            lines.append(self._render_text(hint, inner, bg))
+        header = Text("Maintainer teams", p.style(p.text, p.bg, bold=True))
+        right = Text(" ↵ files ", p.style(p.faint, p.bg))
+        return self._box(header, lines, width, self._edge(focused), right)
 
     @staticmethod
     def reviewer_logins(pr: PullRequest) -> list[str]:

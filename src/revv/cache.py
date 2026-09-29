@@ -45,6 +45,7 @@ FORMAT = f"4-{_schema()}"
 PR_MAX_AGE = 30 * 86400
 BLOB_MAX_AGE = 14 * 86400
 BLOB_MAX_BYTES = 256 * 1024 * 1024
+TEAMS_MAX_AGE = 86400  # team memberships are re-checked daily
 
 _MISSING = object()
 
@@ -164,6 +165,41 @@ class DiskCache:
 
     def save_ai_check(self, ref: PRRef, check: AiCheck) -> None:
         self._write(self.ai_check_path(ref), check)
+
+    # -- your teams ------------------------------------------------------------------
+
+    def teams_path(self, host: str, org: str, login: str) -> Path:
+        return self.root / "teams" / _slug(host) / f"{_slug(org)}-{_slug(login)}.bin"
+
+    def load_teams(self, host: str, org: str, login: str) -> list[str] | None:
+        path = self.teams_path(host, org, login)
+        try:
+            if time.time() - path.stat().st_mtime > TEAMS_MAX_AGE:
+                return None
+        except OSError:
+            return None
+        value = self._read(path)
+        return value if isinstance(value, list) else None
+
+    def save_teams(self, host: str, org: str, login: str, teams: list[str]) -> None:
+        self._write(self.teams_path(host, org, login), teams)
+
+    def cached_teams(self) -> list[str]:
+        """Every team membership currently cached (for the settings screen)."""
+        teams: list[str] = []
+        root = self.root / "teams"
+        if root.exists():
+            for path in sorted(root.rglob("*.bin")):
+                value = self._read(path)
+                if isinstance(value, list):
+                    teams += [str(t) for t in value]
+        return sorted(set(teams), key=str.lower)
+
+    def clear_teams(self) -> None:
+        """Forget cached team memberships only (they're re-checked on next use)."""
+        import shutil
+
+        shutil.rmtree(self.root / "teams", ignore_errors=True)
 
     # -- inbox -----------------------------------------------------------------------
 

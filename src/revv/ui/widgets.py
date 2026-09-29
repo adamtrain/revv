@@ -62,6 +62,7 @@ class PRHeader(Widget):
         self.message = "Loading…"
         self.syncing = False
         self.hidden: set[str] = set()  # paths of hidden (test/generated) files
+        self.mine: set[str] | None = None  # files your teams maintain (maintainers extra)
         self.ai: AiCheck | None = None  # panc's verdict on the description
 
     def show(self, pr: PullRequest | None, message: str = "") -> None:
@@ -136,6 +137,11 @@ class PRHeader(Widget):
 
         # 3: your review: progress, open threads, size; the pending review on the right
         progress = self._progress(pr, p)
+        if self.mine:
+            mine = [f for f in pr.files if f.path in self.mine]
+            viewed = sum(1 for f in mine if f.is_viewed)
+            color = p.add_fg if viewed == len(mine) else p.accent_fg
+            progress.append(f"   ★ yours {viewed}/{len(mine)}", p.style(color, bold=True))
         unresolved = sum(
             1 for t in ignores().threads(pr.threads) if not t.is_resolved and not t.is_pending
         )

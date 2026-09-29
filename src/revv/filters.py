@@ -76,10 +76,17 @@ def _label_regex(pattern: str) -> re.Pattern[str]:
 
 
 class Ignores:
-    def __init__(self, labels: Iterable[str], rules: Iterable[CommentRule]) -> None:
+    def __init__(
+        self,
+        labels: Iterable[str],
+        rules: Iterable[CommentRule],
+        represented: tuple[str, str] | None = None,
+    ) -> None:
         self.label_patterns = [p.strip() for p in labels if p and p.strip()]
         self._label_regexes = [_label_regex(p) for p in self.label_patterns]
         self.rules = [r for r in rules if r.author or r.text]
+        # (author, marker) of a bot comment revv shows in its own way (maintainer teams)
+        self.represented = represented
 
     # -- labels ----------------------------------------------------------------------
 
@@ -94,6 +101,10 @@ class Ignores:
     def comment_ignored(self, comment: Comment | Review) -> bool:
         if isinstance(comment, Comment) and comment.is_pending:
             return False  # your own drafts are never hidden
+        if self.represented is not None:
+            author, marker = self.represented
+            if comment.author.lower() == author.lower() and marker in comment.body:
+                return True
         return any(rule.matches(comment.author, comment.body) for rule in self.rules)
 
     def comments(self, comments: Iterable[Comment]) -> list[Comment]:
@@ -110,9 +121,13 @@ class Ignores:
             review.state != "PENDING" and bool(review.body.strip()) and self.comment_ignored(review)
         )
 
+    @property
+    def active(self) -> bool:
+        return bool(self.rules or self._label_regexes or self.represented)
+
     def visible_pr(self, pr: PullRequest) -> PullRequest:
         """A copy of the pull request with everything ignored left out."""
-        if not self.rules and not self._label_regexes:
+        if not self.active:
             return pr
         threads = [
             dataclasses.replace(t, comments=self.comments(t.comments))
@@ -141,7 +156,11 @@ def ignores() -> Ignores:
                 text = str(raw.get("text") or "").strip() or None
                 rules.append(CommentRule(author, text))
         labels = [str(p) for p in setting("ignored_labels")]
-        _ignores = Ignores(labels, rules)
+        from revv.maintainers import maintainer_settings  # (it imports config too)
+
+        maintainers = maintainer_settings()
+        represented = (maintainers.author, maintainers.marker) if maintainers else None
+        _ignores = Ignores(labels, rules, represented)
     return _ignores
 
 

@@ -174,6 +174,11 @@ class GitHubBackend:
         )
         return [merge_rest_file(None, item) for item in response.json().get("files") or []]
 
+    async def viewer_teams(self, org: str, login: str) -> list[str]:
+        data = await self.client.graphql(q.VIEWER_TEAMS, org=org, login=login)
+        teams = ((data.get("organization") or {}).get("teams") or {}).get("nodes") or []
+        return [t["combinedSlug"] for t in teams if t and t.get("combinedSlug")]
+
     async def fingerprint(self, ref: PRRef) -> Fingerprint:
         data = await self.client.graphql(
             q.FINGERPRINT, owner=ref.repo.owner, name=ref.repo.name, number=ref.number

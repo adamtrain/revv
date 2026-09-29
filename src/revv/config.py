@@ -32,6 +32,7 @@ DEFAULTS: dict[str, Any] = {
     "panc": False,  # check PR descriptions for AI writing with panc (sends them to Pangram)
     "ignored_labels": [],  # label patterns to treat as if they don't exist (`*` wildcards)
     "ignored_comments": [],  # rules: {"author": ..., "text": ...}; see revv.filters
+    "maintainers": {},  # opinionated extra, off by default; see revv.maintainers
 }
 
 IGNORED_PR_TTL = 180 * 86400  # forget ignored pull requests after half a year

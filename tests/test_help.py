@@ -4,7 +4,13 @@ from pathlib import Path
 
 from revv.ui.app import RevvApp
 from revv.ui.conversation import ConversationView
-from revv.ui.dialogs import HELP_SECTIONS, SubmitReviewDialog, display_key, help_markdown
+from revv.ui.dialogs import (
+    HELP_SECTIONS,
+    MAINTAINER_HELP,
+    SubmitReviewDialog,
+    display_key,
+    help_markdown,
+)
 from revv.ui.diffview import DiffView
 from revv.ui.editor import CommentEditor
 from revv.ui.filetree import FileTree
@@ -15,7 +21,8 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 
 
 def documented_keys() -> set[str]:
-    return {token for _, rows in HELP_SECTIONS for keys, _ in rows for token in keys.split()}
+    sections = [*HELP_SECTIONS, MAINTAINER_HELP]  # the latter shows when that extra is on
+    return {token for _, rows in sections for keys, _ in rows for token in keys.split()}
 
 
 def test_every_binding_is_in_the_help() -> None:
