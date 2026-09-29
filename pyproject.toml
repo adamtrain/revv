@@ -1,0 +1,43 @@
+[project]
+name = "revv"
+version = "0.1.0"
+description = "A fast, keyboard-driven terminal UI for reviewing GitHub pull requests"
+readme = "README.md"
+authors = [
+    { name = "Adam Train", email = "adam@adametrain.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28",
+    "textual>=8.2",
+]
+
+[project.scripts]
+revv = "revv.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-textual-snapshot>=1.0.0",
+    "ruff>=0.16.9",
+    "textual-dev>=1.8.0",
+    "ty>=0.0.84",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003", "SIM108"]
