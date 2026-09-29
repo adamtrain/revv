@@ -23,6 +23,7 @@ from revv.classify import GitAttributes
 from revv.config import display_name, set_nicknames, setting
 from revv.diff import DiffLine, LineKind, parse_patch
 from revv.models import (
+    REACTION_EMOJI,
     ChangedFile,
     Comment,
     Fingerprint,
@@ -38,6 +39,7 @@ from revv.ui.dialogs import (
     ConfirmDialog,
     HelpScreen,
     NicknameDialog,
+    ReactionPicker,
     SubmitResult,
     SubmitReviewDialog,
 )
@@ -171,6 +173,7 @@ class ReviewScreen(Screen):
         Binding("y", "copy_location", "Copy location", show=False),
         Binding("at", "nicknames", "Nicknames", show=False),
         Binding("L", "since_review", "Since last review", show=False),
+        Binding("plus", "react", "React", show=False),
         Binding("T", "hide_kind('test')", "Hide tests", show=False),
         Binding("X", "hide_kind('generated')", "Hide generated", show=False),
     ]
@@ -452,7 +455,7 @@ class ReviewScreen(Screen):
             if item is not None and item.kind == "thread":
                 hints += [("↵", "jump to code"), ("r", "reply"), ("x", "resolve")]
             elif item is not None and item.kind in ("comment", "review"):
-                hints += [("↵", "fold"), ("r", "quote reply"), ("x", "resolve")]
+                hints += [("↵", "fold"), ("r", "quote reply"), ("x", "resolve"), ("+", "react")]
                 obj = item.obj
                 if getattr(obj, "viewer_can_update", False):
                     hints.append(("e", "edit"))
@@ -504,7 +507,7 @@ class ReviewScreen(Screen):
                     hints.append(("e", "edit"))
                 if comment is not None and comment.viewer_can_delete:
                     hints.append(("d", "delete"))
-                hints += [("z", "fold"), ("n", "next thread")]
+                hints += [("+", "react"), ("z", "fold"), ("n", "next thread")]
             elif row.is_code:
                 line = row.line_on(diff.cursor_side) if row.kind is RowKind.SPLIT else row.line
                 if line is not None and line.expanded:
@@ -967,6 +970,35 @@ class ReviewScreen(Screen):
         if await self._run("update the comment", task):
             self.notify("Marked as resolved ✓" if resolve else "Unresolved", timeout=1.5)
         self.after_change(threads=False)
+
+    def action_react(self) -> None:
+        if not self._ready(write=True):
+            return
+        target: Comment | Review | PullRequest | None = self._current_comment()
+        if self.tab == "conversation":
+            item = self.conversation.focused_item
+            if item is not None and item.kind == "description":
+                target = self.pr
+        if target is None:
+            self.notify("Move to a comment to react to it", timeout=2)
+            return
+        self.react_to(target)
+
+    @work(group="edit")
+    async def react_to(self, target: Comment | Review | PullRequest) -> None:
+        mine = {r.content for r in target.reactions if r.viewer_has_reacted}
+        content = await self.app.push_screen_wait(ReactionPicker(mine))
+        if content is None:
+            return
+        task = await self._optimistic(self.session.toggle_reaction(target, content))
+        self.after_change(threads=False)
+        self.diff.refresh()
+        if await self._run("react", task):
+            emoji = REACTION_EMOJI.get(content, content)
+            added = task.result()
+            self.notify(f"{emoji} added" if added else f"{emoji} removed", timeout=1.2)
+        self.after_change(threads=False)
+        self.diff.refresh()
 
     def action_edit(self) -> None:
         if not self._ready(write=True):

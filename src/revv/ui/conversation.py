@@ -320,7 +320,7 @@ class ConversationView(VerticalScroll):
         body = SUGGESTION_RE.sub(lambda m: "```\n" + m.group(1) + "```\n_(suggested change)_", body)
         return self.md.markdown(body, width, p.style(p.text, p.bg))
 
-    def _reactions(self, obj: Comment | Review, width: int) -> list[Strip]:
+    def _reactions(self, obj: Comment | Review | PullRequest, width: int) -> list[Strip]:
         if not obj.reactions:
             return []
         p = self.palette
@@ -352,6 +352,7 @@ class ConversationView(VerticalScroll):
             right.append(" ", p.style(bg=p.bg))
         inner = width - 4
         body = self._markdown(pr.body, inner)
+        body += self._reactions(pr, inner)
         body.append(Strip.blank(inner, p.style(bg=p.bg)))
         reviewers = Text("Reviewers: ", p.style(p.faint, p.bg))
         seen = set()

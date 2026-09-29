@@ -71,6 +71,7 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `V` then `c` | comment on a range of lines |
 | `s` | suggest a change |
 | `r` · `x` · `e` · `d` | reply · resolve/unresolve · edit · delete |
+| `+` | react with an emoji (on comments, reviews and the description) |
 | `v` | mark the file as viewed and go to the next unviewed one |
 | `T` · `X` | show test files · generated files (they start hidden); again: hide them and mark them viewed |
 | `\|` | unified / side-by-side |

@@ -58,6 +58,7 @@ query PullRequest($owner: String!, $name: String!, $number: Int!) {{
   repository(owner: $owner, name: $name) {{
     pullRequest(number: $number) {{
       id number title body url state isDraft createdAt updatedAt
+      {REACTIONS}
       author {{ login }}
       baseRefName headRefName baseRefOid headRefOid
       headRepository {{ nameWithOwner }}

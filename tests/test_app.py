@@ -588,3 +588,33 @@ async def test_changes_since_last_review(app: RevvApp, backend: DemoBackend) -> 
         assert screen.since is None
         assert len(screen.diff.sections) == 11
         assert not banner.display
+
+
+async def test_reactions(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        goto(screen.diff, code_line("src/netkit/retry.py", "RETRYABLE = "))
+        await pilot.press("n")  # into the thread below the line
+        comment = screen.diff.active_comment
+        assert comment is not None
+        await pilot.press("plus")
+        await pilot.pause()
+        await pilot.press("1")  # 👍
+        await pilot.pause(0.1)
+        thumbs = next(r for r in comment.reactions if r.content == "THUMBS_UP")
+        assert thumbs.viewer_has_reacted and thumbs.count == 1
+        await pilot.press("plus")
+        await pilot.pause()
+        await pilot.press("1")  # again: take it back
+        await pilot.pause(0.1)
+        assert not any(r.content == "THUMBS_UP" for r in comment.reactions)
+        # the description can be reacted to from the conversation tab
+        await pilot.press("2")
+        await pilot.pause()
+        description = next(c for c in screen.query(Card) if c.item.kind == "description")
+        description.focus()
+        await pilot.press("plus")
+        await pilot.pause()
+        await pilot.press("7")  # 🚀
+        await pilot.pause(0.1)
+        assert any(r.content == "ROCKET" and r.viewer_has_reacted for r in screen.pr.reactions)

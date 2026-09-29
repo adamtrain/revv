@@ -252,6 +252,7 @@ def parse_pull_request(data: Json, ref: PRRef) -> tuple[PullRequest, dict[str, s
         comments=[parse_issue_comment(c) for c in _nodes(node.get("comments"))],
         reviews=[parse_review(r) for r in _nodes(node.get("reviews"))],
         commits=commits,
+        reactions=parse_reactions(node.get("reactionGroups")),
         total_commits=(node.get("headCommit") or {}).get("totalCount", len(commits)),
     )
     cursors: dict[str, str | None] = {}

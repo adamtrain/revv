@@ -285,6 +285,7 @@ class PullRequest:
     reviews: list[Review] = field(default_factory=list)
     commits: list[Commit] = field(default_factory=list)
     total_commits: int = 0
+    reactions: list[Reaction] = field(default_factory=list)  # on the description
 
     @property
     def pending_review(self) -> Review | None:

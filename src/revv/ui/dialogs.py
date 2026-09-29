@@ -14,7 +14,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RadioButton, RadioSet, Static, TextArea
 
-from revv.models import PullRequest, ReviewEvent
+from revv.models import REACTION_EMOJI, PullRequest, ReviewEvent
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -230,6 +230,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("x", "resolve / unresolve the thread (or conversation comment)"),
             ("e", "edit your comment"),
             ("d", "delete your comment"),
+            ("+", "react with an emoji"),
             ("z", "fold / unfold thread (or file)"),
         ],
     ),
@@ -386,6 +387,58 @@ class NicknameDialog(ModalScreen[dict[str, str] | None]):
     def action_save(self) -> None:
         names = {str(field.name): field.value.strip() for field in self.query(Input)}
         self.dismiss({login: name for login, name in names.items() if name})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ReactionPicker(ModalScreen[str | None]):
+    """Pick an emoji reaction: number keys, or click. Yours are highlighted."""
+
+    DEFAULT_CSS = """
+    ReactionPicker { align: center middle; background: $background 40%; }
+    ReactionPicker > Vertical {
+        width: auto; height: auto; background: $surface; border: round $primary;
+        padding: 0 1; border-title-style: bold;
+    }
+    ReactionPicker Horizontal { width: auto; height: auto; margin: 1 0 0 0; }
+    ReactionPicker Button { min-width: 8; width: 8; margin: 0 1 0 0; border: none; height: 3; }
+    ReactionPicker Button.mine { background: $primary 45%; }
+    ReactionPicker #reaction-hints { color: $text-muted; margin: 1 0; width: auto; }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        *[Binding(str(i + 1), f"pick({i})", show=False) for i in range(8)],
+        Binding("escape,q", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, mine: set[str], title: str = "React") -> None:
+        super().__init__()
+        self.mine = mine
+        self.title_text = title
+        self.contents = list(REACTION_EMOJI)
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as box:
+            box.border_title = self.title_text
+            with Horizontal():
+                for index, content in enumerate(self.contents):
+                    yield Button(
+                        f"{REACTION_EMOJI[content]} {index + 1}",
+                        id=f"r-{content}",
+                        classes="mine" if content in self.mine else "",
+                    )
+            yield Static(
+                "1–8 to toggle a reaction · highlighted ones are yours · esc to close",
+                id="reaction-hints",
+            )
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        self.dismiss((event.button.id or "").removeprefix("r-") or None)
+
+    def action_pick(self, index: int) -> None:
+        self.dismiss(self.contents[index])
 
     def action_cancel(self) -> None:
         self.dismiss(None)

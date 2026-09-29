@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from revv.backend import Backend
 from revv.cache import DiskCache
 from revv.models import (
+    REACTION_EMOJI,
     ChangedFile,
     Comment,
     FileStatus,
@@ -405,10 +406,11 @@ class ReviewSession:
             await asyncio.to_thread(self.cache.save_blob, self.ref.repo, *key, fetched.get(key))
         return self._contents[key]
 
-    async def toggle_reaction(self, item: Comment | Review, content: str) -> None:
+    async def toggle_reaction(self, item: Comment | Review | PullRequest, content: str) -> bool:
+        """Add your reaction, or take it back if it's there. Returns whether it was added."""
+        before = [Reaction(r.content, r.count, r.viewer_has_reacted) for r in item.reactions]
         reaction = next((r for r in item.reactions if r.content == content), None)
         add = reaction is None or not reaction.viewer_has_reacted
-        await self.backend.set_reaction(item.id, content, add)
         if reaction is None:
             item.reactions.append(Reaction(content, 1, True))
         else:
@@ -416,3 +418,16 @@ class ReviewSession:
             reaction.viewer_has_reacted = add
             if reaction.count <= 0:
                 item.reactions.remove(reaction)
+        order = list(REACTION_EMOJI)
+        item.reactions.sort(key=lambda r: order.index(r.content) if r.content in order else 99)
+        thread = self.thread_of(item) if isinstance(item, Comment) else None
+        if thread is not None:
+            thread.touch()
+        try:
+            await self.backend.set_reaction(item.id, content, add)
+        except Exception:
+            item.reactions = before
+            if thread is not None:
+                thread.touch()
+            raise
+        return add
