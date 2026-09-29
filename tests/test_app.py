@@ -489,33 +489,55 @@ async def test_inbox_sorting_stacks_and_ignoring(backend: DemoBackend) -> None:
     from textual.widgets import OptionList
 
     from revv import config
-    from revv.ui.inbox import Entry, StackHeader
+    from revv.ui.inbox import StackHeader
 
     app = RevvApp(backend, repo=DEMO_REF.repo)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause(0.3)
         inbox = app.screen
         assert isinstance(inbox, InboxScreen)
+        options = inbox.query_one(OptionList)
 
         def order() -> list[str]:
             items, _ = inbox._items()
-            rows = inbox._arrange(items)
             return [
                 f"stack{r.item.stack_number}"
                 if isinstance(r, StackHeader)
                 else f"#{r.item.ref.number}"
-                for r in rows
+                for r in inbox._arrange(items)
             ]
 
-        # oldest (lowest number) first; a stack stays together in stack order
-        assert order() == ["#17", "#40", "#42", "stack3", "#44", "#46"]
+        # oldest (lowest number) first; a stack is folded into one row
+        assert order() == ["#17", "#40", "#42", "stack3"]
         await pilot.press("s")
-        assert order() == ["stack3", "#44", "#46", "#42", "#40", "#17"]
+        assert order() == ["stack3", "#42", "#40", "#17"]
         assert config.load_config()["inbox_sort"] == "desc"
         await pilot.press("s")
 
+        # enter on a stack unfolds it (it doesn't open a pull request) ...
+        options.highlighted = options.get_option_index("stack:STACK_3")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, InboxScreen)
+        assert order() == ["#17", "#40", "#42", "stack3", "#44", "#46"]
+        # ... with the lowest pull request you haven't reviewed highlighted
+        assert options.highlighted_option is not None
+        assert options.highlighted_option.id == "github.com/acme/netkit#44"
+        await pilot.press("left")  # fold it again
+        await pilot.pause()
+        assert order() == ["#17", "#40", "#42", "stack3"]
+        assert options.highlighted_option.id == "stack:STACK_3"
+        await pilot.press("right")  # arrows unfold too
+        await pilot.pause()
+        assert "#46" in order()
+        await pilot.press("down", "enter")  # a member opens as usual
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, ReviewScreen)
+        assert app.screen.session.ref.number == 46
+        await pilot.press("q")
+        await pilot.pause(0.2)
+
         # ignore the highlighted pull request
-        options = inbox.query_one(OptionList)
         options.highlighted = options.get_option_index("github.com/acme/netkit#17")
         await pilot.press("i")
         await pilot.pause()
@@ -528,7 +550,6 @@ async def test_inbox_sorting_stacks_and_ignoring(backend: DemoBackend) -> None:
         await pilot.pause()
         assert "github.com/acme/netkit#17" not in config.ignored_prs()
         assert inbox.current == "requested"
-        assert all(isinstance(r, (Entry, StackHeader)) for r in inbox._arrange(inbox._items()[0]))
 
 
 async def test_search_changed_lines(app: RevvApp) -> None:

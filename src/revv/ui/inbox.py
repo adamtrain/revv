@@ -7,6 +7,7 @@ import contextlib
 from dataclasses import dataclass
 from typing import ClassVar
 
+from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 from textual import on, work
@@ -49,8 +50,15 @@ class Entry:
 
 @dataclass(slots=True)
 class StackHeader:
-    item: PRSummary  # any member, for the stack's details
-    shown: int  # how many of its pull requests are in this list
+    """A stack of pull requests: folded into one row, or a header above its members."""
+
+    item: PRSummary  # the stack's next pull request to review (the lowest unreviewed one)
+    members: list[PRSummary]  # in stack order
+    expanded: bool = False
+
+    @property
+    def stack_id(self) -> str:
+        return self.item.stack_id or ""
 
 
 class InboxScreen(Screen):
@@ -80,8 +88,10 @@ class InboxScreen(Screen):
         Binding("q", "app.quit", "Quit", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         Binding("escape", "clear_filter", "Clear", show=False),
-        Binding("tab,l,right", "section(1)", "Next section", show=False),
-        Binding("shift+tab,h,left", "section(-1)", "Previous section", show=False),
+        Binding("tab", "section(1)", "Next section", show=False),
+        Binding("shift+tab", "section(-1)", "Previous section", show=False),
+        Binding("right,l", "expand_stack", "Expand stack", show=False),
+        Binding("left,h", "collapse_stack", "Collapse stack", show=False),
         Binding("j", "cursor(1)", "Down", show=False),
         Binding("k", "cursor(-1)", "Up", show=False),
         Binding("r,R", "reload", "Refresh", show=False),
@@ -118,6 +128,9 @@ class InboxScreen(Screen):
         self._loaded_once = False
         self._status = ""
         self._filtering = False  # the user asked for the filter box (/ or typing a number)
+        self.expanded_stacks: set[str] = set()
+        self._stack_focus: dict[str, PRSummary] = {}
+        self._pending_highlight: str | None = None
 
     @property
     def scope(self) -> RepoRef | None:
@@ -147,6 +160,7 @@ class InboxScreen(Screen):
             ("↵", "review"),
             ("/", "filter or #number"),
             ("tab", "section"),
+            ("→ ←", "stack"),
             ("s", "newest first" if self.sort == "asc" else "oldest first"),
             ("i", "unignore" if self.current == IGNORED else "ignore"),
             ("o", "browser"),
@@ -318,7 +332,8 @@ class InboxScreen(Screen):
         return all(word in haystack for word in query.lower().split())
 
     def _arrange(self, items: list[PRSummary]) -> list[Entry | StackHeader]:
-        """Sort by number and keep the pull requests of a stack together, in stack order."""
+        """Sort by number; a stack becomes one row (or a header and its members, in stack
+        order, once expanded)."""
         ordered = sorted(items, key=lambda i: i.ref.number, reverse=self.sort == "desc")
         stacks: dict[str, list[PRSummary]] = {}
         for item in ordered:
@@ -326,6 +341,7 @@ class InboxScreen(Screen):
                 stacks.setdefault(item.stack_id, []).append(item)
         rows: list[Entry | StackHeader] = []
         placed: set[str] = set()
+        self._stack_focus = {}
         for item in ordered:
             stack = item.stack_id if item.stack_id in stacks else None
             if stack is None:
@@ -335,10 +351,14 @@ class InboxScreen(Screen):
                 continue
             placed.add(stack)
             members = sorted(stacks[stack], key=lambda i: i.stack_position)
-            rows.append(StackHeader(members[0], len(members)))
-            for index, member in enumerate(members):
-                kind = "last" if index == len(members) - 1 else "middle"
-                rows.append(Entry(member, kind))
+            focus = next((m for m in members if not m.my_review_state), members[0])
+            self._stack_focus[stack] = focus
+            expanded = stack in self.expanded_stacks
+            rows.append(StackHeader(focus, members, expanded))
+            if expanded:
+                for index, member in enumerate(members):
+                    kind = "last" if index == len(members) - 1 else "middle"
+                    rows.append(Entry(member, kind))
         return rows
 
     def _render_list(self) -> None:
@@ -373,37 +393,50 @@ class InboxScreen(Screen):
             options.focus()  # the list couldn't take focus while it was empty
         rows = self._arrange(items)
         entries: list[Option | None] = []
+        ids: list[str] = []
         for row in rows:
             if isinstance(row, StackHeader):
                 if entries:
                     entries.append(None)
-                entries.append(
-                    Option(self._stack_prompt(row), id=f"stack:{row.item.stack_id}", disabled=True)
-                )
+                option_id = f"stack:{row.stack_id}"
+                entries.append(Option(self._stack_prompt(row), id=option_id))
+                ids.append(option_id)
                 continue
             if row.stack is None and entries:
                 entries.append(None)
             entries.append(Option(self._prompt(row), id=row.item.key))
+            ids.append(row.item.key)
         options.add_options(entries)
-        if items:
-            ids = [row.item.key for row in rows if isinstance(row, Entry)]
-            target = highlighted if highlighted in ids else ids[0]
+        if ids:
+            target = self._pending_highlight or highlighted
+            self._pending_highlight = None
+            if target not in ids:
+                # a pull request folded into its stack: highlight the stack
+                item = self._find(target) if target else None
+                stack = f"stack:{item.stack_id}" if item and item.stack_id else None
+                target = stack if stack in ids else ids[0]
             with contextlib.suppress(Exception):
                 options.highlighted = options.get_option_index(target)
 
-    def _stack_prompt(self, header: StackHeader) -> Text:
+    def _stack_prompt(self, header: StackHeader) -> RenderableType:
         p = Palette.from_app(self.app)
         item = header.item
+        line = Table.grid(expand=True, padding=(0, 1))
+        line.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
+        line.add_column(justify="right", no_wrap=True)
         text = Text()
+        text.append("▾ " if header.expanded else "▸ ", p.style(p.accent_fg, bold=True))
         text.append("▤ ", p.style(p.accent_fg, bold=True))
         name = f"Stack #{item.stack_number}" if item.stack_number else "Stack"
         text.append(name, p.style(p.accent_fg, bold=True))
         text.append(f" · {item.stack_size} pull requests", p.style(p.muted))
-        if item.base_ref:
-            text.append(f" into {item.base_ref}", p.style(p.muted))
-        if header.shown < item.stack_size:
-            text.append(f" · {header.shown} shown here", p.style(p.faint, italic=True))
-        return text
+        if len(header.members) < item.stack_size:
+            text.append(f" ({len(header.members)} here)", p.style(p.faint))
+        hint = Text("← collapse" if header.expanded else "→ expand", p.style(p.faint, italic=True))
+        line.add_row(text, hint)
+        if header.expanded:
+            return line
+        return Group(line, self._prompt(Entry(item, "folded")))
 
     def _prompt(self, entry: Entry) -> Table:
         p = Palette.from_app(self.app)
@@ -415,7 +448,7 @@ class InboxScreen(Screen):
 
         # stack connectors in the gutter
         connector = p.style(p.accent_fg)
-        if entry.stack is None:
+        if entry.stack is None or entry.stack == "folded":
             gutters = [Text(""), Text(""), Text("")]
         else:
             more = entry.stack != "last"
@@ -539,15 +572,61 @@ class InboxScreen(Screen):
         if options.option_count:
             options.focus()
             if options.highlighted_option is not None:
-                self._open_option(options.highlighted_option)
+                self._activate(options.highlighted_option)
 
     @on(OptionList.OptionSelected)
     def option_selected(self, event: OptionList.OptionSelected) -> None:
-        self._open_option(event.option)
+        self._activate(event.option)
+
+    def _activate(self, option: Option) -> None:
+        option_id = option.id or ""
+        if option_id.startswith("stack:"):  # enter on a stack folds or unfolds it
+            stack = option_id.removeprefix("stack:")
+            if stack in self.expanded_stacks:
+                self._collapse(stack)
+            else:
+                self._expand(stack)
+            return
+        self._open_option(option)
+
+    def _expand(self, stack: str) -> None:
+        self.expanded_stacks.add(stack)
+        focus = self._stack_focus.get(stack)
+        self._pending_highlight = focus.key if focus else None
+        self._render_list()
+
+    def _collapse(self, stack: str) -> None:
+        self.expanded_stacks.discard(stack)
+        self._pending_highlight = f"stack:{stack}"
+        self._render_list()
+
+    def _highlighted_stack(self) -> str | None:
+        """The stack of the highlighted row (its header, or one of its members)."""
+        option = self.query_one(OptionList).highlighted_option
+        if option is None or option.id is None:
+            return None
+        if option.id.startswith("stack:"):
+            return option.id.removeprefix("stack:")
+        item = self._find(option.id)
+        if item is not None and item.stack_id in self.expanded_stacks:
+            return item.stack_id
+        return None
+
+    def action_expand_stack(self) -> None:
+        stack = self._highlighted_stack()
+        if stack is not None and stack not in self.expanded_stacks:
+            self._expand(stack)
+
+    def action_collapse_stack(self) -> None:
+        stack = self._highlighted_stack()
+        if stack is not None and stack in self.expanded_stacks:
+            self._collapse(stack)
 
     def _find(self, option_id: str | None) -> PRSummary | None:
         if option_id is None:
             return None
+        if option_id.startswith("stack:"):  # a folded stack stands for its next PR
+            return self._stack_focus.get(option_id.removeprefix("stack:"))
         items, _ = self._items()
         return next((i for i in items if i.key == option_id), None)
 

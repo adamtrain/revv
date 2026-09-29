@@ -5,10 +5,10 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 
 - **A review inbox.** Run `revv` inside a repository to see every open pull request where
   your review was requested (directly or through one of your teams) or that is assigned to
-  you. Tabs also list the ones you've reviewed and your own. Stacked pull requests are
-  grouped in stack order, the oldest come first (`s` flips that), and `i` ignores a pull
-  request (it moves to an "Ignored" tab). Anything else is one PR number or URL away:
-  just type it.
+  you. Tabs also list the ones you've reviewed and your own. Stacked pull requests fold
+  into one row showing the next one to review (`→`/`↵` unfold the stack, `←` folds it),
+  the oldest come first (`s` flips that), and `i` ignores a pull request (it moves to an
+  "Ignored" tab). Anything else is one PR number or URL away: just type it.
 - **A pleasant diff.** Every changed file in one scrollable view, syntax-highlighted, with
   word-level highlighting of what changed on a line. Switch between unified and
   side-by-side, expand hidden context, fold files, and jump by change, file or thread. The
