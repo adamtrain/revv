@@ -21,6 +21,7 @@ from revv.github.parse import (
     parse_search_results,
     parse_thread,
 )
+from revv.maintainers import same_login
 from revv.models import (
     ChangedFile,
     Comment,
@@ -57,6 +58,7 @@ class GitHubBackend:
         self.client = client
         self.host = client.host
         self._blob_limit = asyncio.Semaphore(3)
+        self._login: str | None = None
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -173,6 +175,57 @@ class GitHubBackend:
             params={"per_page": 1},
         )
         return [merge_rest_file(None, item) for item in response.json().get("files") or []]
+
+    async def viewer_login(self) -> str:
+        if self._login is None:
+            data = await self.client.graphql("query { viewer { login } }")
+            self._login = (data.get("viewer") or {}).get("login") or ""
+        return self._login
+
+    async def comments_by(self, node_ids: list[str], author: str) -> dict[str, list[Comment]]:
+        """Every conversation comment `author` wrote on these pull requests. All comments
+        are scanned (just their authors, which is cheap), then only the matches are fetched
+        in full, so it doesn't matter where among the comments they are."""
+        ids = list(dict.fromkeys(i for i in node_ids if i))
+        found: dict[str, list[str]] = {}  # pull request → ids of the author's comments
+
+        def collect(pr_id: str, connection: dict[str, Any]) -> str | None:
+            for node in connection.get("nodes") or []:
+                if node and same_login((node.get("author") or {}).get("login") or "", author):
+                    found.setdefault(pr_id, []).append(node["id"])
+            info = connection.get("pageInfo") or {}
+            return info.get("endCursor") if info.get("hasNextPage") else None
+
+        async def rest(pr_id: str, cursor: str | None) -> None:
+            while cursor:
+                data = await self.client.graphql(q.MORE_COMMENT_AUTHORS, id=pr_id, after=cursor)
+                cursor = collect(pr_id, (data.get("node") or {}).get("comments") or {})
+
+        chunks = [ids[i : i + DETAILS_BATCH] for i in range(0, len(ids), DETAILS_BATCH)]
+        more: dict[str, str] = {}
+        for data in await asyncio.gather(
+            *(self.client.graphql(q.COMMENT_AUTHORS, ids=chunk) for chunk in chunks)
+        ):
+            for node in data.get("nodes") or []:
+                if node and node.get("id"):
+                    cursor = collect(node["id"], node.get("comments") or {})
+                    if cursor:
+                        more[node["id"]] = cursor
+        await asyncio.gather(*(rest(pr_id, cursor) for pr_id, cursor in more.items()))
+
+        wanted = [comment for comments in found.values() for comment in comments]
+        batches = [wanted[i : i + 50] for i in range(0, len(wanted), 50)]
+        comments: dict[str, Comment] = {}
+        for data in await asyncio.gather(
+            *(self.client.graphql(q.COMMENTS_BY_ID, ids=batch) for batch in batches)
+        ):
+            for node in data.get("nodes") or []:
+                if node and node.get("id"):
+                    comments[node["id"]] = parse_issue_comment(node)
+        return {
+            pr_id: [comments[c] for c in comment_ids if c in comments]
+            for pr_id, comment_ids in found.items()
+        }
 
     async def viewer_teams(self, org: str, login: str) -> list[str]:
         data = await self.client.graphql(q.VIEWER_TEAMS, org=org, login=login)

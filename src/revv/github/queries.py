@@ -277,6 +277,37 @@ mutation RemoveReaction($input: RemoveReactionInput!) {
 }
 """
 
+# Who wrote each conversation comment: cheap enough to scan every comment of many pull
+# requests, so a bot's comment is found wherever it sits. Bodies are fetched afterwards,
+# for the matching comments only.
+COMMENT_AUTHORS = f"""
+query CommentAuthors($ids: [ID!]!) {{
+  nodes(ids: $ids) {{
+    ... on PullRequest {{
+      id
+      comments(first: 100) {{ {PAGE} nodes {{ id author {{ login }} }} }}
+    }}
+  }}
+}}
+"""
+
+MORE_COMMENT_AUTHORS = f"""
+query MoreCommentAuthors($id: ID!, $after: String!) {{
+  node(id: $id) {{ ... on PullRequest {{
+    comments(first: 100, after: $after) {{ {PAGE} nodes {{ id author {{ login }} }} }}
+  }} }}
+}}
+"""
+
+COMMENTS_BY_ID = (
+    """
+query CommentsById($ids: [ID!]!) {
+  nodes(ids: $ids) { ...IssueCommentFields }
+}
+"""
+    + ISSUE_COMMENT_FIELDS
+)
+
 VIEWER_TEAMS = """
 query MyTeams($org: String!, $login: String!) {
   organization(login: $org) {

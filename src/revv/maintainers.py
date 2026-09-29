@@ -1,6 +1,11 @@
 """Maintainer teams, from a bot comment listing which team maintains which changed file.
 
-An opinionated, off-by-default extra for repositories where a bot posts a comment like:
+A very particular extra, built for one repository: the monorepo where revv's author works
+(VantaInc/obsidian). It switches itself on there and is off everywhere else, so there's
+nothing to set up; it's no use to anyone else, and may change without notice.
+
+In that repository a bot posts a comment like this on every pull request (it can sit
+anywhere among the comments; the newest one counts):
 
     <!-- maintainers-comment -->
     <details>
@@ -13,22 +18,15 @@ An opinionated, off-by-default extra for repositories where a bot posts a commen
     - [other/file.py](…)
     </details>
 
-Turn it on in ~/.config/revv/config.json (it isn't in the settings screen):
+The comment itself is hidden, as if ignored, since revv shows what it says in its own way:
+the file tree groups files by maintainer team (yours first, `m` switches back to folders),
+`M` shows only your teams' files, file headers name their teams, and the inbox says how
+many files of each pull request your teams maintain.
 
-    "maintainers": {"enabled": true}
+Your teams come from GitHub (that needs a token that can read the organization). If GitHub
+can't tell, list them in ~/.config/revv/config.json:
 
-and optionally override who posts the comment and how it's marked:
-
-    "maintainers": {"enabled": true, "author": "developer-experience-ci-cd-app",
-                    "marker": "<!-- maintainers-comment -->"}
-
-Your teams come from GitHub (that needs a token that can read the organization); if GitHub
-can't tell, list them yourself: "my_teams": ["Org/team"]. The comment itself is hidden, as
-if ignored, since revv shows what it says in its own way.
-
-With it on, the file tree groups files by maintainer team (yours first, `m` switches back
-to folders), `M` shows only your teams' files, file headers name their teams, and the
-inbox says how many files of each pull request your teams maintain.
+    "maintainers": {"my_teams": ["VantaInc/some-team"]}
 """
 
 from __future__ import annotations
@@ -37,36 +35,57 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from revv.config import setting
+from revv.config import save_config, setting
+from revv.models import RepoRef
 
 DEFAULT_AUTHOR = "developer-experience-ci-cd-app"
 DEFAULT_MARKER = "<!-- maintainers-comment -->"
+
+# The only repository this is for.
+REPOSITORIES = frozenset({"github.com/vantainc/obsidian"})
 
 _TEAM = re.compile(r"^\s*`?@(?P<team>[\w.-]+/[\w.-]+)`?\s+maintains?\b", re.IGNORECASE)
 _LINKED_FILE = re.compile(r"^\s*[-*+]\s+\[(?P<path>[^\]]+)\]\(")
 _PLAIN_FILE = re.compile(r"^\s*[-*+]\s+`?(?P<path>[^`\s]+)`?\s*$")
 
 
+def applies_to(repo: RepoRef | None) -> bool:
+    """Whether the extra is on in a repository: only in the one it's built for."""
+    return repo is not None and f"{repo.host}/{repo.full_name}".lower() in REPOSITORIES
+
+
 @dataclass(frozen=True, slots=True)
 class MaintainerSettings:
-    author: str
-    marker: str
     my_teams: tuple[str, ...] = ()  # teams you're on, if GitHub can't tell (e.g. SSO)
     group_by_team: bool = True
+    author: str = DEFAULT_AUTHOR
+    marker: str = DEFAULT_MARKER
+
+    @classmethod
+    def load(cls) -> MaintainerSettings:
+        raw = setting("maintainers")
+        raw = raw if isinstance(raw, dict) else {}
+        teams = raw.get("my_teams") or []
+        return cls(
+            my_teams=tuple(str(t) for t in teams if isinstance(t, str)),
+            group_by_team=raw.get("group_by_team", True) is not False,
+        )
 
 
-def maintainer_settings() -> MaintainerSettings | None:
-    """The feature's settings, or None when it's off (the default)."""
+def maintainer_settings(repo: RepoRef | None) -> MaintainerSettings | None:
+    """The extra's settings in a repository, or None where it's off (everywhere else)."""
+    return MaintainerSettings.load() if applies_to(repo) else None
+
+
+def save_maintainer_settings(**changes: object) -> None:
+    """Change some of the extra's settings (they live together under "maintainers")."""
     raw = setting("maintainers")
-    if not isinstance(raw, dict) or not raw.get("enabled"):
-        return None
-    teams = raw.get("my_teams") or []
-    return MaintainerSettings(
-        author=str(raw.get("author") or DEFAULT_AUTHOR).lstrip("@"),
-        marker=str(raw.get("marker") or DEFAULT_MARKER),
-        my_teams=tuple(str(t) for t in teams if isinstance(t, str)),
-        group_by_team=raw.get("group_by_team", True) is not False,
-    )
+    save_config(maintainers={**(raw if isinstance(raw, dict) else {}), **changes})
+
+
+def same_login(a: str, b: str) -> bool:
+    """Whether two logins are the same account ("app" and "app[bot]" are)."""
+    return a.lower().removesuffix("[bot]") == b.lower().removesuffix("[bot]")
 
 
 def team_key(team: str) -> str:
@@ -123,10 +142,11 @@ def parse(body: str) -> Maintainers:
 
 
 def find(comments: Iterable, settings: MaintainerSettings) -> Maintainers | None:
-    """The newest maintainers comment among a pull request's comments, parsed."""
+    """The newest maintainers comment among a pull request's comments (wherever it is in
+    the list), parsed."""
     newest = None
     for comment in comments:
-        if comment.author.lower() != settings.author.lower():
+        if not same_login(comment.author, settings.author):
             continue
         if settings.marker not in comment.body:
             continue
@@ -136,6 +156,34 @@ def find(comments: Iterable, settings: MaintainerSettings) -> Maintainers | None
     if newest is None:
         return None
     return parse(newest.body)
+
+
+async def lookup_my_teams(
+    backend, cache, host: str, login: str, orgs: Iterable[str], extra: Iterable[str] = ()
+) -> set[str]:
+    """The teams you're on in these organizations (team_key() forms), cached for a day.
+    `extra` adds teams from the config for when GitHub won't say."""
+    import asyncio
+
+    teams = {team_key(t) for t in extra}
+    for org in sorted(set(orgs)):
+        cached = cache.load_teams(host, org, login) if cache is not None else None
+        if cached is None:
+            try:
+                cached = await backend.viewer_teams(org, login)
+            except Exception:
+                cached = []  # e.g. the token isn't authorized for the organization
+            if cache is not None:
+                await asyncio.to_thread(cache.save_teams, host, org, login, cached)
+        teams |= {team_key(t) for t in cached}
+    return teams
+
+
+def count_mine(maintainers: Maintainers, my_teams: set[str]) -> tuple[int, int]:
+    """(files your teams maintain, files listed) for a pull request."""
+    paths = list(maintainers.teams_by_path)
+    mine = sum(1 for p in paths if any(team_key(t) in my_teams for t in maintainers.teams_for(p)))
+    return mine, len(paths)
 
 
 @dataclass

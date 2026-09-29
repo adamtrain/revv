@@ -1,7 +1,13 @@
+import io
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
-from revv import filters
+import pytest
+
+from revv import filters, maintainers
+from revv.cache import DiskCache
 from revv.config import save_config
+from revv.demo import DEMO_REF, DemoBackend
 from revv.maintainers import (
     DEFAULT_AUTHOR,
     DEFAULT_MARKER,
@@ -13,7 +19,18 @@ from revv.maintainers import (
     short_team,
     team_key,
 )
-from revv.models import Comment
+from revv.models import Comment, RepoRef
+from revv.ui.app import RevvApp
+
+OBSIDIAN = RepoRef("VantaInc", "obsidian")
+
+
+@pytest.fixture
+def demo_is_obsidian(monkeypatch):
+    """Pretend the demo repository is the one repository the extra is for."""
+    monkeypatch.setattr(maintainers, "REPOSITORIES", frozenset({"github.com/acme/netkit"}))
+    filters.reload()
+
 
 SAMPLE = """<!-- maintainers-comment -->
 <details>
@@ -51,9 +68,9 @@ def test_parse_sample() -> None:
     assert maintainers.teams_for("packages/payments/src/public/index.ts") == [
         "Acme/payments-platform"
     ]
-    assert maintainers.teams_for(
-        "packages/checkout/src/cart/cart-sync.flags.ts"
-    ) == ["Acme/checkout-experience"]
+    assert maintainers.teams_for("packages/checkout/src/cart/cart-sync.flags.ts") == [
+        "Acme/checkout-experience"
+    ]
     assert set(maintainers.files_by_team) == {
         "Acme/checkout-experience",
         "Acme/payments-platform",
@@ -70,23 +87,26 @@ def test_a_file_can_have_several_teams() -> None:
     assert maintainers.teams_for("y.py") == ["Org/b"]
 
 
-def test_find_uses_the_newest_bot_comment() -> None:
-    settings = MaintainerSettings(DEFAULT_AUTHOR, DEFAULT_MARKER)
+def test_find_uses_the_newest_bot_comment_wherever_it_is() -> None:
+    settings = MaintainerSettings()
     old = comment(DEFAULT_AUTHOR, DEFAULT_MARKER + "\n`@Org/old` maintains:\n- [a.py](u)", age=5)
     new = comment(DEFAULT_AUTHOR, DEFAULT_MARKER + "\n`@Org/new` maintains:\n- [a.py](u)", age=1)
     impostor = comment("someone", DEFAULT_MARKER + "\n`@Org/fake` maintains:\n- [a.py](u)")
     unmarked = comment(DEFAULT_AUTHOR, "`@Org/nope` maintains:\n- [a.py](u)")
-    found = find([old, impostor, new, unmarked], settings)
+    chatter = [comment("mona", f"comment {i}", age=10 + i) for i in range(150)]
+    found = find([*chatter, old, impostor, new, unmarked, *chatter], settings)
     assert found is not None and found.teams_for("a.py") == ["Org/new"]
-    assert find([impostor], settings) is None
+    assert find([impostor, *chatter], settings) is None
+    # REST-style bot logins match too
+    bot = comment(DEFAULT_AUTHOR + "[bot]", DEFAULT_MARKER + "\n`@Org/x` maintains:\n- [b.py](u)")
+    found = find([bot], settings)
+    assert found is not None and found.teams_for("b.py") == ["Org/x"]
 
 
 def test_ownership() -> None:
     ownership = Ownership(parse(SAMPLE), {team_key("Acme/payments-platform")})
     assert ownership.mine("packages/payments/src/public/index.ts")
-    assert not ownership.mine(
-        "packages/checkout/src/cart/cart-sync.flags.ts"
-    )
+    assert not ownership.mine("packages/checkout/src/cart/cart-sync.flags.ts")
     assert ownership.group_order(
         [
             "packages/payments/src/public/index.ts",
@@ -97,25 +117,31 @@ def test_ownership() -> None:
     assert short_team("@Acme/payments-platform") == "payments-platform"
 
 
-def test_off_by_default_and_hides_the_comment_when_on() -> None:
-    assert maintainer_settings() is None
+def test_only_on_in_its_one_repository() -> None:
+    assert maintainer_settings(OBSIDIAN) == MaintainerSettings()
+    assert maintainer_settings(RepoRef("vantainc", "Obsidian")) is not None
+    assert maintainer_settings(DEMO_REF.repo) is None
+    assert maintainer_settings(RepoRef("VantaInc", "obsidian", host="ghe.example.com")) is None
+    assert maintainer_settings(None) is None
+    save_config(maintainers={"my_teams": ["Acme/billing-lifecycle"]})
+    settings = maintainer_settings(OBSIDIAN)
+    assert settings is not None and settings.my_teams == ("Acme/billing-lifecycle",)
+
+
+def test_the_comment_is_hidden_only_where_the_extra_is_on() -> None:
     bot = comment(DEFAULT_AUTHOR, SAMPLE)
+    assert filters.ignores(OBSIDIAN).comment_ignored(bot)  # shown in revv's own way instead
+    other = comment(DEFAULT_AUTHOR, "a different comment")
+    assert not filters.ignores(OBSIDIAN).comment_ignored(other)
+    assert not filters.ignores(DEMO_REF.repo).comment_ignored(bot)
     assert not filters.ignores().comment_ignored(bot)
-    save_config(maintainers={"enabled": True})
-    filters.reload()
-    assert maintainer_settings() == MaintainerSettings(DEFAULT_AUTHOR, DEFAULT_MARKER)
-    assert filters.ignores().comment_ignored(bot)  # represented structurally instead
-    assert not filters.ignores().comment_ignored(comment(DEFAULT_AUTHOR, "a different comment"))
 
 
-async def test_maintainer_teams_in_the_review(tmp_path) -> None:
-    from revv.demo import DEMO_REF, DemoBackend
-    from revv.ui.app import RevvApp
+async def test_maintainer_teams_in_the_review(demo_is_obsidian) -> None:
     from revv.ui.conversation import Card
+    from revv.ui.dialogs import HelpScreen
     from revv.ui.review import ReviewScreen
 
-    save_config(maintainers={"enabled": True})
-    filters.reload()
     app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo)
     async with app.run_test(size=(150, 45)) as pilot:
         await pilot.pause(0.4)
@@ -154,11 +180,15 @@ async def test_maintainer_teams_in_the_review(tmp_path) -> None:
         await pilot.pause(0.2)
         assert not screen.group_by_team
         assert "python-reviewers" not in str(screen.file_tree.root.children[0].label)
+        # the help lists m and M here
+        await pilot.press("question_mark")
+        await pilot.pause(0.1)
+        assert isinstance(app.screen, HelpScreen) and app.screen.maintainers
 
 
-async def test_m_and_M_do_nothing_when_the_extra_is_off() -> None:
-    from revv.demo import DEMO_REF, DemoBackend
-    from revv.ui.app import RevvApp
+async def test_nothing_changes_in_other_repositories() -> None:
+    from revv.ui.conversation import Card
+    from revv.ui.dialogs import HelpScreen
     from revv.ui.review import ReviewScreen
 
     app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo)
@@ -166,15 +196,18 @@ async def test_m_and_M_do_nothing_when_the_extra_is_off() -> None:
         await pilot.pause(0.4)
         screen = app.screen
         assert isinstance(screen, ReviewScreen) and screen.ownership is None
+        # the bot's comment is an ordinary comment here
+        authors = [getattr(c.item.obj, "author", "") for c in screen.query(Card)]
+        assert DEFAULT_AUTHOR in authors
         await pilot.press("1", "M", "m")
         await pilot.pause(0.2)
         assert not screen.diff.only_mine
+        await pilot.press("question_mark")
+        await pilot.pause(0.1)
+        assert isinstance(app.screen, HelpScreen) and not app.screen.maintainers
 
 
 def test_team_cache_can_be_forgotten_on_its_own(tmp_path) -> None:
-    from revv.cache import DiskCache
-    from revv.models import RepoRef
-
     cache = DiskCache(tmp_path)
     cache.save_teams("github.com", "acme", "you", ["acme/python-reviewers"])
     cache.save_blob(RepoRef("acme", "netkit"), "abc", "a.py", "x")
@@ -183,3 +216,168 @@ def test_team_cache_can_be_forgotten_on_its_own(tmp_path) -> None:
     cache.clear_teams()
     assert cache.load_teams("github.com", "acme", "you") is None
     assert cache.load_blob(RepoRef("acme", "netkit"), "abc", "a.py") == (True, "x")  # untouched
+
+
+class PagedGitHub:
+    """A GitHub where one pull request has more comments than fit on a page, and the
+    maintainers comment is on the second page."""
+
+    host = "github.com"
+
+    def __init__(self) -> None:
+        self.documents: list[str] = []
+
+    async def graphql(self, document: str, /, **variables):
+        from revv.github import queries as q
+
+        self.documents.append(document)
+        if document == q.COMMENT_AUTHORS:
+            nodes = []
+            for pr in variables["ids"]:
+                if pr == "PR_busy":
+                    people = [{"id": f"IC_{i}", "author": {"login": "mona"}} for i in range(100)]
+                    page = {"hasNextPage": True, "endCursor": "page-2"}
+                else:
+                    people = [
+                        {"id": "IC_hello", "author": {"login": "mona"}},
+                        {"id": "IC_quiet", "author": {"login": DEFAULT_AUTHOR}},
+                    ]
+                    page = {"hasNextPage": False, "endCursor": None}
+                nodes.append({"id": pr, "comments": {"pageInfo": page, "nodes": people}})
+            return {"nodes": nodes}
+        if document == q.MORE_COMMENT_AUTHORS:
+            assert variables == {"id": "PR_busy", "after": "page-2"}
+            people = [
+                {"id": "IC_late", "author": {"login": DEFAULT_AUTHOR}},
+                {"id": "IC_ghost", "author": None},  # a deleted account
+            ]
+            page = {"hasNextPage": False, "endCursor": None}
+            return {"node": {"comments": {"pageInfo": page, "nodes": people}}}
+        if document == q.COMMENTS_BY_ID:
+            return {
+                "nodes": [
+                    {
+                        "id": comment_id,
+                        "body": f"{DEFAULT_MARKER} {comment_id}",
+                        "author": {"login": DEFAULT_AUTHOR},
+                        "createdAt": "2026-09-01T00:00:00Z",
+                    }
+                    for comment_id in variables["ids"]
+                ]
+            }
+        raise AssertionError(f"unexpected query {document[:40]}")
+
+
+async def test_every_comment_is_scanned_for_the_bots() -> None:
+    from revv.github.backend import GitHubBackend
+    from revv.github.client import GitHubClient
+
+    backend = GitHubBackend(cast(GitHubClient, PagedGitHub()))
+    found = await backend.comments_by(["PR_busy", "PR_quiet"], DEFAULT_AUTHOR)
+    assert {pr: [c.id for c in comments] for pr, comments in found.items()} == {
+        "PR_busy": ["IC_late"],
+        "PR_quiet": ["IC_quiet"],
+    }
+    assert found["PR_busy"][0].body == f"{DEFAULT_MARKER} IC_late"
+
+
+def _row_text(inbox, key: str) -> str:
+    from rich.console import Console
+    from textual.widgets import OptionList
+
+    console = Console(width=150, file=io.StringIO(), record=True)
+    console.print(inbox.query_one(OptionList).get_option(key).prompt)
+    return console.export_text()
+
+
+async def test_the_inbox_counts_your_teams_files(demo_is_obsidian) -> None:
+    from rich.text import Text
+    from textual.widgets import Input, OptionList
+
+    from revv.ui.inbox import InboxScreen
+    from revv.ui.palette import Palette
+
+    app = RevvApp(DemoBackend(latency=0), repo=DEMO_REF.repo)
+    async with app.run_test(size=(150, 45)) as pilot:
+        await pilot.pause(0.5)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        assert inbox.my_teams == {"acme/python-reviewers"}
+        section = next(s for s in inbox.sections if s.key == "requested")
+        rows = {item.ref.number: item for item in section.items}
+        assert rows[17].maintainers is not None
+        assert set(rows[17].maintainers) == {
+            "pyproject.toml",
+            "src/netkit/__init__.py",
+            "README.md",
+        }
+        p = Palette.from_app(app)
+
+        def note(number: int) -> str | None:
+            text: Text | None = inbox._ownership_note(rows[number], p)
+            return text.plain if text is not None else None
+
+        assert note(17) == "★ 2 files are your team's"
+        assert note(40) == "no files are your team's"
+        assert note(44) == "★ 1 is your team's"  # after "3 files, "
+        assert note(46) is None  # no maintainers comment
+        assert "★ 2 files are your team's" in _row_text(inbox, "github.com/acme/netkit#17")
+        assert "3 files, ★ 1 is your team's" in _row_text(inbox, "stack:STACK_3")  # #44
+        # a team's name finds the pull requests with files it maintains
+        inbox.query_one("#filter", Input).value = "web-platform"
+        await pilot.pause(0.1)
+        options = inbox.query_one(OptionList)
+        ids = [options.get_option_at_index(i).id for i in range(options.option_count)]
+        assert [i for i in ids if i] == ["github.com/acme/netkit#40", "github.com/acme/netkit#42"]
+
+
+async def test_the_inbox_leaves_other_repositories_alone(monkeypatch) -> None:
+    from revv.ui.inbox import InboxScreen
+
+    backend = DemoBackend(latency=0)
+    calls = []
+    original = backend.comments_by
+
+    async def spy(node_ids: list[str], author: str) -> dict[str, list[Comment]]:
+        calls.append(node_ids)
+        return await original(node_ids, author)
+
+    monkeypatch.setattr(backend, "comments_by", spy)
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=(150, 45)) as pilot:
+        await pilot.pause(0.5)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        assert not calls
+        assert all(i.maintainers is None for s in inbox.sections for i in s.items)
+        assert "your team" not in _row_text(inbox, "github.com/acme/netkit#17")
+
+
+async def test_settings_offer_the_team_reset_only_there(tmp_path, monkeypatch) -> None:
+    from revv.ui.settings import SettingsScreen
+
+    cache = DiskCache(tmp_path / "cache")
+    app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo, cache=cache)
+    async with app.run_test(size=(150, 50)) as pilot:
+        await pilot.pause(0.4)
+        await pilot.press("comma")
+        await pilot.pause(0.1)
+        assert isinstance(app.screen, SettingsScreen)
+        assert not app.screen.query("#forget-teams")  # nobody else ever sees it
+        await pilot.press("escape")
+
+    monkeypatch.setattr(maintainers, "REPOSITORIES", frozenset({"github.com/acme/netkit"}))
+    filters.reload()
+    app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo, cache=cache)
+    async with app.run_test(size=(150, 50)) as pilot:
+        await pilot.pause(0.4)
+        assert cache.cached_teams() == ["acme/python-reviewers"]
+        await pilot.press("comma")
+        await pilot.pause(0.1)
+        screen = app.screen
+        assert isinstance(screen, SettingsScreen)
+        notes = " ".join(str(s.render()) for s in screen.query(".note"))
+        assert "change without notice" in notes and "no use to anybody else" in notes
+        screen.query_one("#forget-teams").press()
+        await pilot.pause(0.3)
+        assert cache.cached_teams() == ["acme/python-reviewers"]  # checked again with GitHub

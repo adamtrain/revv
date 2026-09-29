@@ -36,7 +36,15 @@ from revv.inbox import (
     carry_over_details,
     inbox_sections,
     load_details,
+    load_maintainers,
     load_section,
+)
+from revv.maintainers import (
+    Maintainers,
+    MaintainerSettings,
+    applies_to,
+    count_mine,
+    team_key,
 )
 from revv.models import PRRef, PRSummary, RepoRef
 from revv.targets import parse_pr_ref
@@ -139,6 +147,12 @@ class InboxScreen(Screen):
         self.expanded_stacks: set[str] = set()
         self._stack_focus: dict[str, PRSummary] = {}
         self._pending_highlight: str | None = None
+        self.my_teams = self._known_teams()  # for the maintainer-teams extra
+
+    def _known_teams(self) -> set[str]:
+        """Your teams as last looked up, until they're checked again."""
+        cached = self.cache.cached_teams() if self.cache is not None else []
+        return {team_key(t) for t in [*cached, *MaintainerSettings.load().my_teams]}
 
     @property
     def scope(self) -> RepoRef | None:
@@ -305,7 +319,24 @@ class InboxScreen(Screen):
             return
         self._render_list()
         self._save_cache()
+        await self._load_maintainers(sections)
         self._set_status("")
+
+    async def _load_maintainers(self, sections: list[InboxSection]) -> None:
+        with contextlib.suppress(Exception):  # an extra: the inbox works without it
+            teams = await load_maintainers(self.backend, self.cache, sections)
+            if teams is not None and sections is self.sections:
+                self.my_teams = teams
+                self._render_list()
+                self._save_cache()
+
+    @work(exclusive=True, group="maintainers")
+    async def recheck_teams(self) -> None:
+        """Look your teams up again (after the settings screen forgot the cached ones)."""
+        self.my_teams = self._known_teams()
+        self._render_list()
+        if self._loaded_once:
+            await self._load_maintainers(self.sections)
 
     # -- the list --------------------------------------------------------------------
 
@@ -335,6 +366,7 @@ class InboxScreen(Screen):
                 item.ref.repo.full_name,
                 *item.requested_teams,
                 *(label.name for label in ignores().labels(item.labels)),
+                *self._maintainer_teams(item),
             ]
         ).lower()
         return all(word in haystack for word in query.lower().split())
@@ -520,6 +552,10 @@ class InboxScreen(Screen):
             if item.changed_files:
                 files = item.changed_files
                 detail.append(f" · {files} file{'s' if files != 1 else ''}", p.style(p.muted))
+            ownership = self._ownership_note(item, p)
+            if ownership is not None:
+                detail.append(", " if item.changed_files else " · ", p.style(p.muted))
+                detail.append_text(ownership)
             if item.comments:
                 detail.append(
                     f" · {item.comments} comment{'s' if item.comments != 1 else ''}",
@@ -550,6 +586,27 @@ class InboxScreen(Screen):
         table.add_row(gutters[1], who, checks)
         table.add_row(gutters[2], detail, status)
         return table
+
+    @staticmethod
+    def _maintainer_teams(item: PRSummary) -> set[str]:
+        return {team for teams in (item.maintainers or {}).values() for team in teams}
+
+    def _ownership_note(self, item: PRSummary, p: Palette) -> Text | None:
+        """How many of the files your teams maintain (the maintainer-teams extra)."""
+        if not item.maintainers or self.current == "mine" or not applies_to(item.ref.repo):
+            return None
+        if not self.my_teams:  # we don't know your teams: say how many teams are involved
+            teams = len(self._maintainer_teams(item))
+            return Text(f"{teams} maintainer team{'s' if teams != 1 else ''}", p.style(p.muted))
+        mine, _ = count_mine(Maintainers(item.maintainers), self.my_teams)
+        yours = {t for t in self._maintainer_teams(item) if team_key(t) in self.my_teams}
+        whose = "your teams'" if len(yours) > 1 else "your team's"
+        verb = "is" if mine == 1 else "are"
+        if not mine:
+            none = "none" if item.changed_files else "no files"
+            return Text(f"{none} are {whose}", p.style(p.faint))
+        count = f"{mine}" if item.changed_files else f"{mine} file{'' if mine == 1 else 's'}"
+        return Text(f"★ {count} {verb} {whose}", p.style(p.accent_fg, bold=True))
 
     @staticmethod
     def _label(name: str, color: str, p: Palette) -> Text:

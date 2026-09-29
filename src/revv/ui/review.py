@@ -23,7 +23,15 @@ from revv import filters, panc
 from revv.classify import GitAttributes
 from revv.config import display_name, save_config, setting, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
-from revv.maintainers import Ownership, find, maintainer_settings, short_team, team_key
+from revv.maintainers import (
+    Ownership,
+    applies_to,
+    find,
+    maintainer_settings,
+    save_maintainer_settings,
+    short_team,
+    team_key,
+)
 from revv.models import (
     REACTION_EMOJI,
     AiCheck,
@@ -201,8 +209,8 @@ class ReviewScreen(Screen):
             None  # remote state known to change nothing visible
         )
         self.ai_check: AiCheck | None = None  # panc's verdict on the description
-        self.ownership: Ownership | None = None  # maintainer teams (an opt-in extra)
-        settings = maintainer_settings()
+        self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
+        settings = maintainer_settings(session.ref.repo)
         self.group_by_team = settings.group_by_team if settings else True
         self._teams_loaded = False
         self._marked_kinds: set[str] = set()  # kinds hidden with T / X, which marks them viewed
@@ -286,8 +294,8 @@ class ReviewScreen(Screen):
         return {path: i for i, path in enumerate(ranked)}
 
     def _update_ownership(self, pr: PullRequest) -> None:
-        """Read the maintainers comment (if the feature is on) and your teams (cached)."""
-        settings = maintainer_settings()
+        """Read the maintainers comment (where the extra is on) and your teams (cached)."""
+        settings = maintainer_settings(self.session.ref.repo)
         found = find(pr.comments, settings) if settings else None
         if found is None:
             self.ownership = None
@@ -304,7 +312,7 @@ class ReviewScreen(Screen):
         """Look your teams up again (after the settings screen forgot the cached ones)."""
         self._teams_loaded = False
         if self.ownership is not None:
-            settings = maintainer_settings()
+            settings = maintainer_settings(self.session.ref.repo)
             self.ownership.my_teams = (
                 {team_key(t) for t in settings.my_teams} if settings else set()
             )
@@ -316,7 +324,7 @@ class ReviewScreen(Screen):
         if ownership is None:
             return
         self._teams_loaded = True
-        settings = maintainer_settings()
+        settings = maintainer_settings(self.session.ref.repo)
         extra = settings.my_teams if settings else ()
         teams = await self.session.my_teams(ownership.maintainers.orgs, extra)
         if self.ownership is None or teams == self.ownership.my_teams:
@@ -416,9 +424,7 @@ class ReviewScreen(Screen):
     def action_group_by_team(self) -> None:
         """m: group the files by maintainer team, or by folder."""
         self.group_by_team = not self.group_by_team
-        raw = setting("maintainers")
-        if isinstance(raw, dict):
-            save_config(maintainers={**raw, "group_by_team": self.group_by_team})
+        save_maintainer_settings(group_by_team=self.group_by_team)
         self._present(self.pr)
         self.notify(
             "Grouped by maintainer team" if self.group_by_team else "Grouped by folder", timeout=1.5
@@ -734,7 +740,7 @@ class ReviewScreen(Screen):
         self.diff.focus()
 
     def action_help(self) -> None:
-        self.app.push_screen(HelpScreen())
+        self.app.push_screen(HelpScreen(maintainers=applies_to(self.session.ref.repo)))
 
     def _people_here(self) -> list[str]:
         """Who `@` renames: the people in whatever is selected."""
@@ -1597,13 +1603,13 @@ class ReviewScreen(Screen):
         if self._syncing or remote == self._acknowledged:
             return
         changes = remote.changes_since(local)
-        if changes and filters.ignores().active:
+        shown = filters.ignores(session.ref.repo)
+        if changes and shown.active:
             # Only announce what you'd actually see: compare with ignored comments left out.
             try:
                 fresh = await session.backend.load_pull_request(session.ref, reuse=session.pr)
             except Exception:
                 return
-            shown = filters.ignores()
             changes = Fingerprint.of(shown.visible_pr(fresh)).changes_since(
                 Fingerprint.of(shown.visible_pr(session.pr))
             )

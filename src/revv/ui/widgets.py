@@ -167,7 +167,7 @@ class PRHeader(Widget):
 
     @staticmethod
     def _conversation_count(pr: PullRequest) -> int:
-        shown = ignores()
+        shown = ignores(pr.ref.repo)
         return len(shown.comments(pr.comments)) + len(shown.threads(pr.threads))
 
     def _progress(self, pr: PullRequest, p: Palette) -> Text:

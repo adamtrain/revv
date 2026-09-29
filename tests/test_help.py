@@ -21,7 +21,7 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 
 
 def documented_keys() -> set[str]:
-    sections = [*HELP_SECTIONS, MAINTAINER_HELP]  # the latter shows when that extra is on
+    sections = [*HELP_SECTIONS, MAINTAINER_HELP]  # the latter shows where that extra is on
     return {token for _, rows in sections for keys, _ in rows for token in keys.split()}
 
 

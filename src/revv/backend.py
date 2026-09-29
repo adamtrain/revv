@@ -37,6 +37,14 @@ class Backend(Protocol):
         """Files (with patches) changed between two commits, e.g. since your last review."""
         ...
 
+    async def viewer_login(self) -> str:
+        """Your login."""
+        ...
+
+    async def comments_by(self, node_ids: list[str], author: str) -> dict[str, list[Comment]]:
+        """All conversation comments `author` wrote on these pull requests (by node id)."""
+        ...
+
     async def viewer_teams(self, org: str, login: str) -> list[str]:
         """The teams ("org/slug") of an organization that `login` is a member of."""
         ...

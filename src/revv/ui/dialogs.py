@@ -319,7 +319,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ),
 ]
 
-# Only shown when the (opt-in) maintainer-teams extra is on.
+# Only shown where the maintainer-teams extra is on (one repository).
 MAINTAINER_HELP: tuple[str, list[tuple[str, str]]] = (
     "Maintainer teams",
     [
@@ -381,9 +381,10 @@ class HelpScreen(ModalScreen[None]):
         Binding("escape,q,question_mark", "close", "Close", show=False),
     ]
 
-    def __init__(self, first: str | None = None) -> None:
+    def __init__(self, first: str | None = None, *, maintainers: bool = False) -> None:
         super().__init__()
         self.first = first  # the section to show first (e.g. "Inbox")
+        self.maintainers = maintainers  # the maintainer-teams extra is on here
 
     def compose(self) -> ComposeResult:
         with VerticalScroll() as scroll:
@@ -392,10 +393,8 @@ class HelpScreen(ModalScreen[None]):
             yield Static(self._table())
 
     def _sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
-        from revv.maintainers import maintainer_settings
-
         sections = list(HELP_SECTIONS)
-        if maintainer_settings() is not None:
+        if self.maintainers:
             sections.insert(-1, MAINTAINER_HELP)
         if self.first:
             sections.sort(key=lambda section: section[0] != self.first)

@@ -9,6 +9,7 @@ import random
 from datetime import UTC, datetime, timedelta
 
 from revv.diff import make_patch
+from revv.maintainers import same_login
 from revv.models import (
     ChangedFile,
     Comment,
@@ -953,6 +954,44 @@ class DemoBackend:
                 )
             )
         return files
+
+    async def viewer_login(self) -> str:
+        return VIEWER
+
+    def _inbox_comments(self, node_id: str) -> list[Comment]:
+        """Conversation comments of the other pull requests in the demo inbox."""
+        teams = {
+            "PR_40": [("acme/web-platform", ["web/src/stream.ts", "web/src/body.ts"])],
+            "PR_17": [
+                ("acme/python-reviewers", ["pyproject.toml", "src/netkit/__init__.py"]),
+                ("acme/docs", ["README.md"]),
+            ],
+            "PR_44": [("acme/python-reviewers", ["src/netkit/urls.py"])],
+        }.get(node_id)
+        if teams is None:
+            return []
+        lines = ["<!-- maintainers-comment -->", "<details>"]
+        for team, paths in teams:
+            lines += [f"`@{team}` maintains:", *[f"- [{p}](url)" for p in paths], ""]
+        lines.append("</details>")
+        return [
+            self._comment("mona", "Could someone take a look?", 40, review=False),
+            self._comment("ci-bot", "Coverage unchanged.", 35, review=False),
+            self._comment("developer-experience-ci-cd-app", "\n".join(lines), 30, review=False),
+        ]
+
+    async def comments_by(self, node_ids: list[str], author: str) -> dict[str, list[Comment]]:
+        await self._wait()
+        result: dict[str, list[Comment]] = {}
+        for node_id in node_ids:
+            if node_id in (self._pr.id, f"PR_{DEMO_REF.number}"):
+                comments = self._pr.comments
+            else:
+                comments = self._inbox_comments(node_id)
+            matching = [copy.deepcopy(c) for c in comments if same_login(c.author, author)]
+            if matching:
+                result[node_id] = matching
+        return result
 
     async def viewer_teams(self, org: str, login: str) -> list[str]:
         await self._wait()

@@ -10,6 +10,8 @@ import asyncio
 from dataclasses import dataclass, field
 
 from revv.backend import Backend
+from revv.cache import DiskCache
+from revv.maintainers import MaintainerSettings, applies_to, find, lookup_my_teams
 from revv.models import PRRef, PRSummary, RepoRef
 
 
@@ -68,6 +70,7 @@ DETAIL_FIELDS = (
     "requested_teams",
     "checks_state",
     "details_loaded",
+    "maintainers",
 )
 
 
@@ -86,6 +89,32 @@ async def load_details(backend: Backend, sections: list[InboxSection]) -> None:
     items = [item for section in sections for item in section.items]
     if items:
         await backend.pull_request_details(items)
+
+
+async def load_maintainers(
+    backend: Backend, cache: DiskCache | None, sections: list[InboxSection]
+) -> set[str] | None:
+    """Read the maintainers comment of each pull request in the one repository the
+    maintainer-teams extra is for into its row, and return the teams you're on (None when
+    no row is from there)."""
+    rows: dict[str, list[PRSummary]] = {}  # a pull request can be in several sections
+    for section in sections:
+        for item in section.items:
+            if item.node_id and applies_to(item.ref.repo):
+                rows.setdefault(item.node_id, []).append(item)
+    if not rows:
+        return None
+    settings = MaintainerSettings.load()
+    comments = await backend.comments_by(list(rows), settings.author)
+    orgs: set[str] = set()
+    for node_id, items in rows.items():
+        found = find(comments.get(node_id, []), settings)
+        if found is not None:
+            orgs |= found.orgs
+        for item in items:
+            item.maintainers = dict(found.teams_by_path) if found else {}
+    login = await backend.viewer_login()
+    return await lookup_my_teams(backend, cache, backend.host, login, orgs, settings.my_teams)
 
 
 async def load_inbox(backend: Backend, sections: list[InboxSection]) -> None:

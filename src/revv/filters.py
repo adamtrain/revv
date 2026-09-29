@@ -22,7 +22,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from revv.config import save_config, setting
-from revv.models import Comment, Label, PullRequest, Review, ReviewThread
+from revv.maintainers import DEFAULT_AUTHOR, DEFAULT_MARKER, applies_to, same_login
+from revv.models import Comment, Label, PullRequest, RepoRef, Review, ReviewThread
 
 _WORD = re.compile(r"\w+")
 
@@ -103,7 +104,7 @@ class Ignores:
             return False  # your own drafts are never hidden
         if self.represented is not None:
             author, marker = self.represented
-            if comment.author.lower() == author.lower() and marker in comment.body:
+            if same_login(comment.author, author) and marker in comment.body:
                 return True
         return any(rule.matches(comment.author, comment.body) for rule in self.rules)
 
@@ -142,13 +143,16 @@ class Ignores:
         )
 
 
-_ignores: Ignores | None = None
+_ignores: dict[bool, Ignores] = {}
 version = 0  # bumped whenever the rules change, for render caches
 
 
-def ignores() -> Ignores:
-    global _ignores
-    if _ignores is None:
+def ignores(repo: RepoRef | None = None) -> Ignores:
+    """What to leave out. Pass the repository where conversation comments are shown: the
+    maintainer-teams extra hides its bot's comment in the one repository it's for."""
+    represented = applies_to(repo)
+    cached = _ignores.get(represented)
+    if cached is None:
         rules = []
         for raw in setting("ignored_comments"):
             if isinstance(raw, dict):
@@ -156,17 +160,14 @@ def ignores() -> Ignores:
                 text = str(raw.get("text") or "").strip() or None
                 rules.append(CommentRule(author, text))
         labels = [str(p) for p in setting("ignored_labels")]
-        from revv.maintainers import maintainer_settings  # (it imports config too)
-
-        maintainers = maintainer_settings()
-        represented = (maintainers.author, maintainers.marker) if maintainers else None
-        _ignores = Ignores(labels, rules, represented)
-    return _ignores
+        bot = (DEFAULT_AUTHOR, DEFAULT_MARKER) if represented else None
+        cached = _ignores[represented] = Ignores(labels, rules, bot)
+    return cached
 
 
 def reload() -> None:
-    global _ignores, version
-    _ignores = None
+    global version
+    _ignores.clear()
     version += 1
 
 

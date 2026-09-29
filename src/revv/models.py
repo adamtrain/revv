@@ -441,6 +441,8 @@ class PRSummary:
     stack_number: int | None = None
     stack_size: int = 0
     stack_position: int = 0  # 1 is the pull request closest to the base branch
+    # path → maintainer teams, from the maintainers comment (a one-repository extra); None: unknown
+    maintainers: dict[str, list[str]] | None = None
 
     @property
     def key(self) -> str:

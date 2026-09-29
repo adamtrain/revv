@@ -15,7 +15,7 @@ from textual.widgets import Button, Input, Label, Select, Static, Switch
 from revv import filters, panc
 from revv.cache import default_cache_dir
 from revv.config import config_path, ignored_prs, save_config, set_nicknames, setting
-from revv.maintainers import maintainer_settings
+from revv.maintainers import MaintainerSettings, applies_to
 from revv.ui.dialogs import NicknameDialog
 
 
@@ -132,8 +132,13 @@ class SettingsScreen(ModalScreen[None]):
                     yield Input(placeholder="containing these words", id="rule-text")
                     yield Button("Add", id="add-rule-button")
 
-                if maintainer_settings() is not None:
-                    yield Static("Maintainer teams (turned on in config.json)", classes="heading")
+                if self._maintainers_here():
+                    yield Static("Maintainer teams (VantaInc/obsidian only)", classes="heading")
+                    yield Static(
+                        "Built for the one repository where revv's author works, and on only "
+                        "there. It may change without notice, and it's no use to anybody else.",
+                        classes="note",
+                    )
                     with Horizontal(classes="row"):
                         yield Label(self._teams_label(), id="teams-label")
                         yield Button("Forget and re-check", id="forget-teams")
@@ -233,11 +238,25 @@ class SettingsScreen(ModalScreen[None]):
     def _switch(label: str, id: str, value: bool) -> Horizontal:
         return Horizontal(Label(label), Switch(value=value, id=id), classes="row")
 
+    def _maintainers_here(self) -> bool:
+        """Whether the maintainer-teams extra is on for anything open (it's on in only one
+        repository, so everybody else never sees it)."""
+        from revv.ui.inbox import InboxScreen
+        from revv.ui.review import ReviewScreen
+
+        for screen in self.app.screen_stack:
+            if isinstance(screen, ReviewScreen) and applies_to(screen.session.ref.repo):
+                return True
+            if isinstance(screen, InboxScreen) and any(
+                applies_to(item.ref.repo) for section in screen.sections for item in section.items
+            ):
+                return True
+        return False
+
     def _teams_label(self) -> str:
         cache = getattr(self.app, "cache", None)
         teams = cache.cached_teams() if cache is not None else []
-        settings = maintainer_settings()
-        extra = list(settings.my_teams) if settings else []
+        extra = MaintainerSettings.load().my_teams
         known = sorted({*teams, *extra}, key=str.lower)
         if not known:
             return "Your teams: not known yet (checked when a pull request opens)"
@@ -248,10 +267,11 @@ class SettingsScreen(ModalScreen[None]):
         cache = getattr(self.app, "cache", None)
         if cache is not None:
             cache.clear_teams()
+        from revv.ui.inbox import InboxScreen
         from revv.ui.review import ReviewScreen
 
         for screen in self.app.screen_stack:
-            if isinstance(screen, ReviewScreen):
+            if isinstance(screen, (ReviewScreen, InboxScreen)):
                 screen.recheck_teams()
         self.query_one("#teams-label", Label).update(self._teams_label())
         self.notify("Forgot your cached teams; checking GitHub again", timeout=2)

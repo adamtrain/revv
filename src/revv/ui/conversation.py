@@ -138,7 +138,7 @@ class ConversationView(VerticalScroll):
         self._md: MarkdownRenderer | None = None
         self._expanded: dict[str, bool] = {}
         self.ai: AiCheck | None = None  # panc's verdict on the description
-        self.ownership: Ownership | None = None  # maintainer teams (an opt-in extra)
+        self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
         self.ai_running = False
 
     def on_mount(self) -> None:
@@ -174,7 +174,8 @@ class ConversationView(VerticalScroll):
         widgets: list[Widget] = [Card(Item("description", pr), self)]
         if self.ownership is not None:
             widgets.append(Card(Item("maintainers", self.ownership), self))
-        shown = ignores()  # ignored comments (and threads made only of them) don't exist
+        # ignored comments (and threads made only of them) don't exist
+        shown = ignores(pr.ref.repo)
         threads = shown.threads(pr.threads)
         if threads:
             open_threads = [t for t in threads if not t.is_resolved]

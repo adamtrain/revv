@@ -88,26 +88,12 @@ class ReviewSession:
         return review, copies
 
     async def my_teams(self, orgs: set[str], extra: Iterable[str] = ()) -> set[str]:
-        """The teams you're on in these organizations (normalized "org/slug"), cached for a
-        day. `extra` adds teams from the config for when GitHub won't say."""
-        from revv.maintainers import team_key
+        """The teams you're on in these organizations (cached for a day)."""
+        from revv.maintainers import lookup_my_teams
 
-        teams = {team_key(t) for t in extra}
-        login = self.pr.viewer_login
-        for org in sorted(orgs):
-            cached = self.cache.load_teams(self.ref.repo.host, org, login) if self.cache else None
-            if cached is None:
-                try:
-                    found = await self.backend.viewer_teams(org, login)
-                except Exception:
-                    found = []  # e.g. the token isn't authorized for the organization
-                if self.cache is not None:
-                    await asyncio.to_thread(
-                        self.cache.save_teams, self.ref.repo.host, org, login, found
-                    )
-                cached = found
-            teams |= {team_key(t) for t in cached}
-        return teams
+        return await lookup_my_teams(
+            self.backend, self.cache, self.ref.repo.host, self.pr.viewer_login, orgs, extra
+        )
 
     async def fingerprint(self) -> Fingerprint:
         return await self.backend.fingerprint(self.ref)
