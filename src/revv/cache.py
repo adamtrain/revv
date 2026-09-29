@@ -26,7 +26,22 @@ from typing import Any
 
 from revv.models import PRRef, PullRequest, RepoRef
 
-FORMAT = 3  # bump when cached classes change shape
+
+def _schema() -> str:
+    """A fingerprint of the cached data classes: any change to their fields invalidates
+    old cache entries automatically, instead of unpickling objects with missing fields."""
+    import dataclasses
+
+    from revv import models
+
+    parts = []
+    for name, value in sorted(vars(models).items()):
+        if isinstance(value, type) and dataclasses.is_dataclass(value):
+            parts.append(name + ":" + ",".join(f.name for f in dataclasses.fields(value)))
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+FORMAT = f"4-{_schema()}"
 PR_MAX_AGE = 30 * 86400
 BLOB_MAX_AGE = 14 * 86400
 BLOB_MAX_BYTES = 256 * 1024 * 1024

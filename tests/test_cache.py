@@ -136,3 +136,22 @@ async def test_inbox_shows_cached_rows_first(tmp_path: Path) -> None:
                 break
             await pilot.pause(0.02)
         assert len(requested.items) == 5
+
+
+def test_entries_from_another_schema_are_ignored(tmp_path: Path) -> None:
+    import pickle
+    import zlib
+
+    cache = DiskCache(tmp_path)
+    path = cache.inbox_path("github.com", "acme/netkit")
+    path.parent.mkdir(parents=True)
+    # what an older revv wrote: a different format tag
+    path.write_bytes(zlib.compress(pickle.dumps((3, {"requested": []}))))
+    assert cache.load_inbox("github.com", "acme/netkit") is None
+
+
+def test_schema_fingerprint_tracks_model_fields() -> None:
+    from revv import cache as cache_module
+
+    assert f"4-{cache_module._schema()}" == cache_module.FORMAT
+    assert len(cache_module._schema()) == 16
