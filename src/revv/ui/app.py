@@ -10,6 +10,7 @@ from textual.binding import Binding, BindingType
 from textual.screen import Screen
 
 from revv.backend import Backend
+from revv.cache import DiskCache
 from revv.config import load_config, save_config
 from revv.models import PRRef, RepoRef
 from revv.session import ReviewSession
@@ -34,9 +35,11 @@ class RevvApp(App[str | None]):
         target: PRRef | None = None,
         repo: RepoRef | None = None,
         all_repos: bool = False,
+        cache: DiskCache | None = None,
     ) -> None:
         super().__init__()
         self.backend = backend
+        self.cache = cache
         self.target = target
         self.repo = repo
         self.all_repos = all_repos
@@ -50,13 +53,18 @@ class RevvApp(App[str | None]):
         if self.target is not None:
             self.open_review(self.target, from_inbox=False)
         else:
-            self.push_screen(InboxScreen(self.backend, self.repo, all_repos=self.all_repos))
+            self.push_screen(
+                InboxScreen(self.backend, self.repo, all_repos=self.all_repos, cache=self.cache)
+            )
+        if self.cache is not None:
+            self.run_worker(self.cache.prune, thread=True, group="prune", exit_on_error=False)
 
     def on_inbox_screen_open_pull_request(self, message: InboxScreen.OpenPullRequest) -> None:
         self.open_review(message.ref, from_inbox=True)
 
     def open_review(self, ref: PRRef, *, from_inbox: bool) -> None:
-        self.push_screen(ReviewScreen(ReviewSession(self.backend, ref), from_inbox=from_inbox))
+        session = ReviewSession(self.backend, ref, cache=self.cache)
+        self.push_screen(ReviewScreen(session, from_inbox=from_inbox))
 
     async def on_unmount(self) -> None:
         await self.backend.aclose()

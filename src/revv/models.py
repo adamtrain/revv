@@ -319,11 +319,14 @@ class PRSummary:
     author: str
     updated_at: datetime
     created_at: datetime | None = None
+    node_id: str = ""
     is_draft: bool = False
     review_decision: str | None = None
     requested_directly: bool = False
     requested_teams: list[str] = field(default_factory=list)
+    assigned: bool = False
     my_review_state: str | None = None  # the viewer's latest review, if any
+    details_loaded: bool = False  # size, checks and reviewers arrive in a second, slower query
     additions: int = 0
     deletions: int = 0
     comments: int = 0

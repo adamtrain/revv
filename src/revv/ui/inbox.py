@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import ClassVar
 
 from rich.table import Table
@@ -16,7 +18,8 @@ from textual.widgets import Input, OptionList, Static, Tab, Tabs
 from textual.widgets.option_list import Option
 
 from revv.backend import Backend
-from revv.inbox import InboxSection, inbox_sections, load_inbox
+from revv.cache import DiskCache
+from revv.inbox import InboxSection, carry_over_details, inbox_sections, load_details, load_section
 from revv.models import PRRef, PRSummary, RepoRef
 from revv.targets import parse_pr_ref
 from revv.ui.palette import Palette
@@ -52,14 +55,23 @@ class InboxScreen(Screen):
         Binding("question_mark", "help", "Help", show=False),
     ]
 
-    def __init__(self, backend: Backend, repo: RepoRef | None, *, all_repos: bool = False) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        repo: RepoRef | None,
+        *,
+        all_repos: bool = False,
+        cache: DiskCache | None = None,
+    ) -> None:
         super().__init__()
         self.backend = backend
         self.repo = repo
         self.all_repos = all_repos or repo is None
+        self.cache = cache
         self.sections: list[InboxSection] = []
         self.current = "requested"
         self._loaded_once = False
+        self._status = ""
 
     @property
     def scope(self) -> RepoRef | None:
@@ -97,16 +109,49 @@ class InboxScreen(Screen):
         if self._loaded_once:
             self.reload(quiet=True)
 
+    @property
+    def _cache_key(self) -> tuple[str, str]:
+        host = self.repo.host if self.repo else self.backend.host
+        return host, self.scope.full_name if self.scope else ""
+
     def _setup_sections(self) -> None:
         self.sections = inbox_sections(self.scope)
+        cached = self.cache.load_inbox(*self._cache_key) if self.cache else None
+        if isinstance(cached, dict):  # show the last known inbox right away
+            for section in self.sections:
+                items = cached.get(section.key)
+                if isinstance(items, list):
+                    section.items = items
+                    section.loaded = True
         tabs = self.query_one(Tabs)
         tabs.clear()
         for section in self.sections:
-            tabs.add_tab(Tab(section.title, id=section.key))
+            tabs.add_tab(Tab(self._tab_label(section), id=section.key))
         if not any(s.key == self.current for s in self.sections):
             self.current = self.sections[0].key
         tabs.active = self.current
         self._update_title()
+        self._render_list()
+
+    @staticmethod
+    def _tab_label(section: InboxSection) -> str:
+        if section.error:
+            return f"{section.title} !"
+        if not section.loaded:
+            return section.title
+        return f"{section.title} {len(section.items)}"
+
+    def _save_cache(self) -> None:
+        if self.cache is None:
+            return
+        cache, key = self.cache, self._cache_key
+        value = {section.key: section.items for section in self.sections if section.loaded}
+        self.run_worker(
+            lambda: cache.save_inbox(*key, value),
+            thread=True,
+            group="inbox-cache",
+            exit_on_error=False,
+        )
 
     def _update_title(self) -> None:
         p = Palette.from_app(self.app)
@@ -116,29 +161,51 @@ class InboxScreen(Screen):
         text.append("  ·  ", p.style(p.faint))
         scope = self.scope.full_name if self.scope else "all repositories"
         text.append(scope, p.style(p.muted))
+        if self._status:
+            width = self.query_one("#title", Static).content_region.width or 80
+            status = Text(self._status, p.style(p.faint))
+            text.pad_right(max(1, width - text.cell_len - status.cell_len))
+            text.append_text(status)
         self.query_one("#title", Static).update(text)
+
+    def _set_status(self, status: str) -> None:
+        self._status = status
+        self._update_title()
 
     @work(exclusive=True, group="inbox")
     async def reload(self, quiet: bool = False) -> None:
-        options = self.query_one(OptionList)
-        if not quiet:
-            options.loading = True
+        """Refresh every section; each one is shown as soon as its search returns, and the
+        slower details (size, checks, reviewers) are filled in afterwards."""
         sections = self.sections
-        await load_inbox(self.backend, sections)
+        options = self.query_one(OptionList)
+        if not quiet and not any(s.loaded for s in sections):
+            options.loading = True
+        self._set_status("↻ refreshing…")
+
+        async def refresh(section: InboxSection) -> None:
+            previous = {item.ref: item for item in section.items}
+            await load_section(self.backend, section)
+            carry_over_details(previous, section.items)
+            if sections is self.sections:
+                self.query_one(Tabs).query_one(f"#{section.key}", Tab).label = self._tab_label(
+                    section
+                )
+                if section.key == self.current:
+                    options.loading = False
+                    self._render_list()
+
+        await asyncio.gather(*(refresh(section) for section in sections))
         options.loading = False
         self._loaded_once = True
         if sections is not self.sections:
-            return  # scope changed meanwhile
-        tabs = self.query_one(Tabs)
-        for section in sections:
-            label = (
-                f"{section.title} {len(section.items)}"
-                if not section.error
-                else f"{section.title} !"
-            )
-            tab = tabs.query_one(f"#{section.key}", Tab)
-            tab.label = label
+            return  # the scope changed meanwhile
+        with contextlib.suppress(Exception):  # rows are still useful without size and checks
+            await load_details(self.backend, sections)
+        if sections is not self.sections:
+            return
         self._render_list()
+        self._save_cache()
+        self._set_status("")
 
     @property
     def section(self) -> InboxSection | None:
@@ -180,7 +247,6 @@ class InboxScreen(Screen):
                 "requested": "Nothing is waiting for your review 🎉",
                 "reviewed": "No open pull requests that you have reviewed",
                 "mine": "You have no open pull requests",
-                "all": "No open pull requests",
             }
             empty.update(Text(messages.get(section.key, "Nothing here"), style="italic"))
         elif not items and section.loaded:
@@ -215,15 +281,20 @@ class InboxScreen(Screen):
             title.append(" draft", p.style(p.faint, italic=True))
 
         reason = Text()
-        if item.requested_directly and item.my_review_state:
-            reason.append(" re-review ", p.style(p.bg, p.accent, bold=True))
-        elif item.requested_directly:
-            reason.append(" requested: you ", p.style(p.bg, p.warning, bold=True))
-        if item.requested_teams and not item.requested_directly:
-            teams = ", ".join(item.requested_teams[:2])
-            if len(item.requested_teams) > 2:
-                teams += f" +{len(item.requested_teams) - 2}"
-            reason.append(f" team: {teams} ", p.style(p.bg, p.primary, bold=True))
+        if self.current == "requested":
+            if not item.details_loaded:
+                reason.append(" requested ", p.style(p.bg, p.fg_mix(0.5), bold=True))
+            elif item.requested_directly and item.my_review_state:
+                reason.append(" re-review ", p.style(p.bg, p.accent, bold=True))
+            elif item.requested_directly:
+                reason.append(" requested: you ", p.style(p.bg, p.warning, bold=True))
+            elif item.requested_teams:
+                teams = ", ".join(item.requested_teams[:2])
+                if len(item.requested_teams) > 2:
+                    teams += f" +{len(item.requested_teams) - 2}"
+                reason.append(f" team: {teams} ", p.style(p.bg, p.primary, bold=True))
+            elif item.assigned:
+                reason.append(" assigned ", p.style(p.bg, p.primary, bold=True))
 
         meta = Text()
         meta.append(" " * (len(str(item.ref.number)) + 2))
@@ -232,8 +303,9 @@ class InboxScreen(Screen):
             meta.append(" · ", p.style(p.faint))
         meta.append(item.author, p.style(p.author_color(item.author)))
         meta.append(f" · {relative_time(item.updated_at)}", p.style(p.muted))
-        meta.append(f" · +{item.additions}", p.style(p.add_fg))
-        meta.append(f" −{item.deletions}", p.style(p.del_fg))
+        if item.details_loaded:
+            meta.append(f" · +{item.additions}", p.style(p.add_fg))
+            meta.append(f" −{item.deletions}", p.style(p.del_fg))
         if item.comments:
             meta.append(
                 f" · {item.comments} comment{'s' if item.comments != 1 else ''}", p.style(p.muted)
@@ -354,6 +426,7 @@ class InboxScreen(Screen):
             self.notify("Not in a GitHub repository, so the inbox covers all repositories")
             return
         self.all_repos = not self.all_repos
+        self._set_status("")
         self._setup_sections()
         self.query_one(StatusBar).show(
             [

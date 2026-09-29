@@ -4,9 +4,9 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 [Textual](https://textual.textualize.io/).
 
 - **A review inbox.** Run `revv` inside a repository to see every open pull request where
-  your review was requested, directly or through one of your teams. Tabs also list the
-  ones you've reviewed, your own, and all open pull requests. Type any PR number or URL to
-  jump straight to it.
+  your review was requested (directly or through one of your teams) or that is assigned to
+  you. Tabs also list the ones you've reviewed and your own. Anything else is one PR number
+  or URL away: just type it.
 - **A pleasant diff.** Every changed file in one scrollable view, syntax-highlighted, with
   word-level highlighting of what changed on a line. Switch between unified and
   side-by-side, expand hidden context, fold files, and jump by change, file or thread. The
@@ -20,6 +20,9 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 - **Reviews the GitHub way.** Comments go into a pending review, just like "Start a review"
   on github.com, so nothing is lost if you quit. Submit with Comment, Approve or Request
   changes. When no review is pending you can also post a single comment right away.
+- **Instant.** Pull requests and the inbox open straight from an on-disk cache and sync
+  with GitHub in the background. File contents are cached by commit, so they never need
+  fetching twice.
 - **Viewed files.** Mark files as viewed (synced with GitHub's checkbox) and move on to the
   next unviewed one. One key marks **all test files** (or **all generated files**) as
   viewed and hides them.
@@ -43,6 +46,7 @@ revv owner/repo#123   # any pull request (a PR URL works too)
 revv owner/repo       # the inbox of another repository
 revv --all            # your inbox across all repositories
 revv --demo           # try it with built-in sample data, no network needed
+revv --no-cache       # don't read or write the cache in ~/.cache/revv
 ```
 
 GitHub Enterprise works too: revv follows the host of your git remote or the PR URL.

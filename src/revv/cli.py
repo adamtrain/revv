@@ -31,6 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-R", "--repo", help="repository as owner/repo (default: from git remote)")
     parser.add_argument("-a", "--all", action="store_true", help="inbox across all repositories")
     parser.add_argument("--demo", action="store_true", help="use built-in demo data (offline)")
+    parser.add_argument(
+        "--no-cache", action="store_true", help="don't read or write the on-disk cache"
+    )
     parser.add_argument("--version", action="version", version=f"revv {__version__}")
     return parser
 
@@ -72,9 +75,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         backend = GitHubBackend(GitHubClient(token, host))
 
+    from revv.cache import DiskCache
     from revv.ui.app import RevvApp
 
-    app = RevvApp(backend, target=target, repo=repo, all_repos=args.all)
+    cache = None if args.demo or args.no_cache else DiskCache()
+    app = RevvApp(backend, target=target, repo=repo, all_repos=args.all, cache=cache)
     note = app.run()
     if note:
         print(note)

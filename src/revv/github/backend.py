@@ -11,6 +11,7 @@ import httpx
 from revv.github import queries as q
 from revv.github.client import GitHubClient, GitHubError
 from revv.github.parse import (
+    apply_details,
     merge_rest_file,
     parse_graphql_file,
     parse_issue_comment,
@@ -41,6 +42,7 @@ _MORE = {
 
 BLOB_BATCH = 20
 VIEWED_BATCH = 25
+DETAILS_BATCH = 25
 MAX_FILE_PAGES = 30  # GitHub lists at most 3000 files for a pull request
 _LAST_PAGE = re.compile(r'[?&]page=(\d+)[^>]*>;\s*rel="last"')
 
@@ -165,6 +167,14 @@ class GitHubBackend:
     async def search_pull_requests(self, query: str) -> list[PRSummary]:
         data = await self.client.graphql(q.SEARCH_PULL_REQUESTS, query=query)
         return parse_search_results(data, self.host)
+
+    async def pull_request_details(self, items: list[PRSummary]) -> None:
+        ids = list(dict.fromkeys(item.node_id for item in items if item.node_id))
+        chunks = [ids[i : i + DETAILS_BATCH] for i in range(0, len(ids), DETAILS_BATCH)]
+        for data in await asyncio.gather(
+            *(self.client.graphql(q.PR_DETAILS, ids=chunk) for chunk in chunks)
+        ):
+            apply_details(data, items)
 
     # -- reviews -----------------------------------------------------------------
 

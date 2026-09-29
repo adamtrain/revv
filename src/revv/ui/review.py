@@ -124,6 +124,8 @@ class ReviewScreen(Screen):
         self.session = session
         self.from_inbox = from_inbox
         self._busy = 0
+        self._syncing = False
+        self._save_timer = None
 
     # -- composition ---------------------------------------------------------------
 
@@ -180,6 +182,8 @@ class ReviewScreen(Screen):
             )
             return
         self._present(pr, first=True)
+        if not self.session.fresh:  # opened from the disk cache: sync in the background
+            self.refresh_pr(quiet=True)
         self.prefetch()
         self.load_attributes()
 
@@ -300,6 +304,17 @@ class ReviewScreen(Screen):
             self.conversation.show(self.pr)
         self.header.show(self.pr)
         self.update_status()
+        self._save_soon()
+
+    def _save_soon(self) -> None:
+        """Keep the disk cache current after local changes (debounced)."""
+        if self._save_timer is not None:
+            self._save_timer.stop()
+        self._save_timer = self.set_timer(1.5, self.session.save)
+
+    def on_unmount(self) -> None:
+        if self.session.loaded:
+            self.session.save()
 
     @on(DiffView.CursorFileChanged)
     def cursor_file_changed(self, message: DiffView.CursorFileChanged) -> None:
@@ -482,9 +497,14 @@ class ReviewScreen(Screen):
 
     # -- helpers ---------------------------------------------------------------------
 
-    def _ready(self) -> bool:
+    def _ready(self, write: bool = False) -> bool:
         if not self.session.loaded:
             self.notify("Still loading…", timeout=1.5)
+            return False
+        if write and not self.session.fresh:
+            self.notify("Syncing with GitHub — one moment…", timeout=1.5)
+            if not self._syncing:
+                self.refresh_pr(quiet=True)
             return False
         return True
 
@@ -562,7 +582,7 @@ class ReviewScreen(Screen):
     # -- commenting ------------------------------------------------------------------
 
     def action_comment(self) -> None:
-        if not self._ready():
+        if not self._ready(write=True):
             return
         if self.tab == "conversation":
             self.action_general_comment()
@@ -583,7 +603,7 @@ class ReviewScreen(Screen):
         self.comment_on_lines(selection, suggest=False)
 
     def action_suggest(self) -> None:
-        if not self._ready() or self.tab != "files":
+        if not self._ready(write=True) or self.tab != "files":
             return
         selection = self.diff.selection()
         if selection is None:
@@ -674,7 +694,7 @@ class ReviewScreen(Screen):
             )
 
     def action_reply(self) -> None:
-        if not self._ready():
+        if not self._ready(write=True):
             return
         thread = self._current_thread()
         if thread is not None:
@@ -730,7 +750,7 @@ class ReviewScreen(Screen):
         await self._issue_comment(initial)
 
     def action_general_comment(self) -> None:
-        if self._ready():
+        if self._ready(write=True):
             self.general_comment()
 
     @work(group="edit")
@@ -755,7 +775,7 @@ class ReviewScreen(Screen):
     # -- resolving, editing, deleting ------------------------------------------------------
 
     def action_resolve(self) -> None:
-        if not self._ready():
+        if not self._ready(write=True):
             return
         thread = self._current_thread()
         if thread is not None:
@@ -801,7 +821,7 @@ class ReviewScreen(Screen):
         self.after_change(threads=False)
 
     def action_edit(self) -> None:
-        if not self._ready():
+        if not self._ready(write=True):
             return
         comment = self._current_comment()
         if comment is None or not comment.viewer_can_update:
@@ -829,7 +849,7 @@ class ReviewScreen(Screen):
         review.body = updated.body
 
     def action_delete(self) -> None:
-        if not self._ready():
+        if not self._ready(write=True):
             return
         comment = self._current_comment()
         if not isinstance(comment, Comment) or not comment.viewer_can_delete:
@@ -852,7 +872,7 @@ class ReviewScreen(Screen):
     # -- viewed, submit, refresh -------------------------------------------------------
 
     def action_viewed(self) -> None:
-        if not self._ready() or self.tab != "files":
+        if not self._ready(write=True) or self.tab != "files":
             return
         node = self.file_tree.cursor_node if self.file_tree.has_focus else None
         if node is not None and isinstance(node.data, FileSection):
@@ -895,7 +915,7 @@ class ReviewScreen(Screen):
 
     def action_hide_kind(self, kind: str) -> None:
         """Mark every test (or generated) file as viewed and hide it; again to show them."""
-        if not self._ready():
+        if not self._ready(write=True):
             return
         diff = self.diff
         label, key = ("test", "T") if kind == "test" else ("generated", "X")
@@ -953,7 +973,7 @@ class ReviewScreen(Screen):
                 self.mark_sections_viewed(stale, label, key)
 
     def action_submit(self, preset: str | None = None) -> None:
-        if self._ready():
+        if self._ready(write=True):
             self.submit_review(ReviewEvent(preset) if preset else None)
 
     @work(group="edit")
@@ -1003,11 +1023,18 @@ class ReviewScreen(Screen):
     async def refresh_pr(self, quiet: bool = False) -> None:
         if not quiet:
             self.notify("Refreshing…", timeout=1)
+        self._syncing = True
+        self.header.syncing = True
+        self.header.refresh()
         try:
             pr = await self.session.refresh()
         except Exception as error:
             self.notify(str(error), title="Couldn't refresh", severity="error")
             return
+        finally:
+            self._syncing = False
+            self.header.syncing = False
+            self.header.refresh()
         self._present(pr)
         self.prefetch()
         if not quiet:

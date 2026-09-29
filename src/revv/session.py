@@ -10,6 +10,7 @@ import asyncio
 from collections.abc import Iterable
 
 from revv.backend import Backend
+from revv.cache import DiskCache
 from revv.models import (
     ChangedFile,
     Comment,
@@ -26,9 +27,11 @@ from revv.models import (
 
 
 class ReviewSession:
-    def __init__(self, backend: Backend, ref: PRRef) -> None:
+    def __init__(self, backend: Backend, ref: PRRef, cache: DiskCache | None = None) -> None:
         self.backend = backend
         self.ref = ref
+        self.cache = cache
+        self.fresh = False  # False while showing cached data that hasn't been re-synced yet
         self._pr: PullRequest | None = None
         self._contents: dict[tuple[str, str], str | None] = {}
         self._inflight: dict[tuple[str, str], asyncio.Future[str | None]] = {}
@@ -46,7 +49,17 @@ class ReviewSession:
     # -- loading -----------------------------------------------------------------
 
     async def load(self) -> PullRequest:
+        """Load the pull request: instantly from the disk cache if we have it (then call
+        `refresh` to sync), otherwise from GitHub."""
+        if self.cache is not None:
+            cached = await asyncio.to_thread(self.cache.load_pr, self.ref)
+            if cached is not None:
+                self._pr = cached
+                self.fresh = False
+                return cached
         self._pr = await self.backend.load_pull_request(self.ref)
+        self.fresh = True
+        self.save()
         return self._pr
 
     async def refresh(self) -> PullRequest:
@@ -56,7 +69,28 @@ class ReviewSession:
         if previous is not None and previous.head_oid != pr.head_oid:
             self._contents.clear()
         self._pr = pr
+        self.fresh = True
+        self.save()
         return pr
+
+    def save(self) -> None:
+        """Write the current state to the disk cache (serialized here, written off-thread)."""
+        if self.cache is None or self._pr is None:
+            return
+        try:
+            data = self.cache.encode(self._pr)
+        except Exception:
+            return
+        path = self.cache.pr_path(self.ref)
+        cache = self.cache
+
+        def write() -> None:
+            cache.write_bytes(path, data, compress=True)
+
+        try:
+            asyncio.get_running_loop().run_in_executor(None, write)
+        except RuntimeError:
+            write()
 
     # -- file contents -------------------------------------------------------------
 
@@ -82,6 +116,12 @@ class ReviewSession:
                 waiting.append((file.path, self._inflight[key]))
             else:
                 wanted.append(key)
+        if wanted and self.cache is not None:
+            found = await asyncio.to_thread(self._cached_blobs, wanted)
+            for key, text in found.items():
+                self._contents[key] = text
+                result[key[1]] = text
+            wanted = [key for key in wanted if key not in found]
         if wanted:
             loop = asyncio.get_running_loop()
             futures = {key: loop.create_future() for key in wanted}
@@ -100,6 +140,15 @@ class ReviewSession:
                 self._inflight.pop(key, None)
                 future.set_result(text)
                 result[key[1]] = text
+            if self.cache is not None:
+                cache, repo = self.cache, pr.ref.repo
+                items = [(key, fetched.get(key)) for key in futures]
+
+                def store() -> None:
+                    for (oid, path), text in items:
+                        cache.save_blob(repo, oid, path, text)
+
+                asyncio.get_running_loop().run_in_executor(None, store)
         for path, future in waiting:
             try:
                 result[path] = await future
@@ -304,12 +353,29 @@ class ReviewSession:
                 file.viewed = state
             raise
 
+    def _cached_blobs(self, keys: list[tuple[str, str]]) -> dict[tuple[str, str], str | None]:
+        assert self.cache is not None
+        found: dict[tuple[str, str], str | None] = {}
+        for oid, path in keys:
+            hit, text = self.cache.load_blob(self.ref.repo, oid, path)
+            if hit:
+                found[(oid, path)] = text
+        return found
+
     async def text_at_head(self, path: str) -> str | None:
         """Any file of the repository at the head commit (e.g. .gitattributes)."""
         key = (self.pr.head_oid, path)
-        if key not in self._contents:
-            fetched = await self.backend.file_contents(self.pr, [key])
-            self._contents[key] = fetched.get(key)
+        if key in self._contents:
+            return self._contents[key]
+        if self.cache is not None:
+            hit, text = await asyncio.to_thread(self.cache.load_blob, self.ref.repo, *key)
+            if hit:
+                self._contents[key] = text
+                return text
+        fetched = await self.backend.file_contents(self.pr, [key])
+        self._contents[key] = fetched.get(key)
+        if self.cache is not None:
+            await asyncio.to_thread(self.cache.save_blob, self.ref.repo, *key, fetched.get(key))
         return self._contents[key]
 
     async def toggle_reaction(self, item: Comment | Review, content: str) -> None:

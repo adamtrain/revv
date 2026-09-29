@@ -58,6 +58,7 @@ class PRHeader(Widget):
         super().__init__(id=id)
         self.pr: PullRequest | None = None
         self.message = "Loading…"
+        self.syncing = False
 
     def show(self, pr: PullRequest | None, message: str = "") -> None:
         self.pr = pr
@@ -112,6 +113,8 @@ class PRHeader(Widget):
         bottom.append(f" −{pr.deletions}", p.style(p.del_fg))
 
         right = Text()
+        if self.syncing:
+            right.append("⟳ syncing  ", p.style(p.primary_fg))
         viewed = sum(1 for f in pr.files if f.is_viewed)
         done = viewed == len(pr.files)
         right.append(f"{viewed}/{len(pr.files)} viewed", p.style(p.add_fg if done else p.muted))

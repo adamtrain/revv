@@ -925,13 +925,22 @@ class DemoBackend:
             deletions=97,
             comments=1,
         )
+        for item in (main, rereview, team, reviewed, mine):
+            item.node_id = f"PR_{item.ref.number}"
         if "review-requested:@me" in query:
             return [main, rereview, team]
+        if "assignee:@me" in query:
+            return []
         if "reviewed-by:@me" in query:
             return [rereview, reviewed]
         if "author:@me" in query:
             return [mine]
         return [main, rereview, team, reviewed, mine]
+
+    async def pull_request_details(self, items: list[PRSummary]) -> None:
+        await self._wait()
+        for item in items:
+            item.details_loaded = True
 
     def _find_thread(self, thread_id: str) -> ReviewThread:
         return next(t for t in self._pr.threads if t.id == thread_id)

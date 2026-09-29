@@ -268,6 +268,38 @@ def parse_search_results(data: Json, host: str) -> list[PRSummary]:
             continue
         repo = node.get("repository") or {}
         ref = PRRef(RepoRef(_login(repo.get("owner")), repo.get("name", ""), host), node["number"])
+        my_state = None
+        for review in _nodes(node.get("latestReviews")):
+            if _login(review.get("author")) == viewer:
+                my_state = review.get("state")
+        results.append(
+            PRSummary(
+                ref=ref,
+                title=node.get("title") or "",
+                author=_login(node.get("author")),
+                updated_at=parse_time(node.get("updatedAt")) or _EPOCH,
+                created_at=parse_time(node.get("createdAt")),
+                node_id=node.get("id") or "",
+                is_draft=bool(node.get("isDraft")),
+                my_review_state=my_state,
+                head_ref=node.get("headRefName") or "",
+                labels=[
+                    Label(n["name"], n.get("color", "888888")) for n in _nodes(node.get("labels"))
+                ],
+            )
+        )
+    return results
+
+
+def apply_details(data: Json, items: list[PRSummary]) -> None:
+    """Fill in the slow fields (from PR_DETAILS) of inbox rows, in place."""
+    viewer = _login(data.get("viewer"))
+    by_id: dict[str, list[PRSummary]] = {}
+    for item in items:
+        by_id.setdefault(item.node_id, []).append(item)
+    for node in data.get("nodes") or []:
+        if not node or node.get("id") not in by_id:
+            continue
         users: list[str] = []
         teams: list[str] = []
         for request in _nodes(node.get("reviewRequests")):
@@ -276,32 +308,16 @@ def parse_search_results(data: Json, host: str) -> list[PRSummary]:
                 teams.append(reviewer.get("combinedSlug") or "team")
             elif reviewer:
                 users.append(_login(reviewer))
-        my_state = None
-        for review in _nodes(node.get("latestReviews")):
-            if _login(review.get("author")) == viewer:
-                my_state = review.get("state")
         head = _nodes(node.get("commits"))
         rollup = (head[0].get("commit") or {}).get("statusCheckRollup") if head else None
-        results.append(
-            PRSummary(
-                ref=ref,
-                title=node.get("title") or "",
-                author=_login(node.get("author")),
-                updated_at=parse_time(node.get("updatedAt")) or _EPOCH,
-                created_at=parse_time(node.get("createdAt")),
-                is_draft=bool(node.get("isDraft")),
-                review_decision=node.get("reviewDecision"),
-                requested_directly=viewer in users,
-                requested_teams=teams,
-                my_review_state=my_state,
-                additions=node.get("additions") or 0,
-                deletions=node.get("deletions") or 0,
-                comments=(node.get("comments") or {}).get("totalCount", 0),
-                head_ref=node.get("headRefName") or "",
-                checks_state=rollup.get("state") if rollup else None,
-                labels=[
-                    Label(n["name"], n.get("color", "888888")) for n in _nodes(node.get("labels"))
-                ],
-            )
-        )
-    return results
+        assignees = {_login(a) for a in _nodes(node.get("assignees"))}
+        for item in by_id[node["id"]]:
+            item.review_decision = node.get("reviewDecision")
+            item.additions = node.get("additions") or 0
+            item.deletions = node.get("deletions") or 0
+            item.comments = (node.get("comments") or {}).get("totalCount", 0)
+            item.requested_directly = viewer in users
+            item.requested_teams = teams
+            item.assigned = viewer in assignees
+            item.checks_state = rollup.get("state") if rollup else None
+            item.details_loaded = True

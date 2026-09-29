@@ -1,4 +1,8 @@
-"""The review inbox: which pull requests are waiting for you."""
+"""The review inbox: which pull requests are waiting for you.
+
+Only pull requests that involve you are listed (requested from you or one of your teams,
+assigned to you, reviewed by you, or opened by you); anything else is one PR number away.
+"""
 
 from __future__ import annotations
 
@@ -6,14 +10,14 @@ import asyncio
 from dataclasses import dataclass, field
 
 from revv.backend import Backend
-from revv.models import PRSummary, RepoRef
+from revv.models import PRRef, PRSummary, RepoRef
 
 
 @dataclass
 class InboxSection:
     key: str
     title: str
-    query: str
+    queries: list[str]
     items: list[PRSummary] = field(default_factory=list)
     error: str | None = None
     loaded: bool = False
@@ -22,35 +26,67 @@ class InboxSection:
 def inbox_sections(repo: RepoRef | None) -> list[InboxSection]:
     scope = f" repo:{repo.full_name}" if repo else " archived:false"
     base = "is:pr is:open sort:updated-desc" + scope
-    sections = [
-        # review-requested includes requests to any team you are a member of
-        InboxSection("requested", "To review", base + " review-requested:@me"),
-        InboxSection("reviewed", "Reviewed", base + " reviewed-by:@me -author:@me"),
-        InboxSection("mine", "Mine", base + " author:@me"),
+    return [
+        # review-requested also matches requests to any team you're a member of
+        InboxSection(
+            "requested",
+            "To review",
+            [base + " review-requested:@me", base + " assignee:@me -author:@me"],
+        ),
+        InboxSection("reviewed", "Reviewed", [base + " reviewed-by:@me -author:@me"]),
+        InboxSection("mine", "Mine", [base + " author:@me"]),
     ]
-    if repo is not None:
-        sections.append(InboxSection("all", "All open", base))
-    return sections
+
+
+async def load_section(backend: Backend, section: InboxSection) -> None:
+    """Run a section's searches (the quick part) and merge their results."""
+    try:
+        results = await asyncio.gather(*(backend.search_pull_requests(q) for q in section.queries))
+    except Exception as error:  # shown in the tab instead of failing the whole inbox
+        section.error = str(error)
+        section.loaded = True
+        return
+    merged: dict[PRRef, PRSummary] = {}
+    for index, items in enumerate(results):
+        for item in items:
+            if item.ref not in merged:
+                merged[item.ref] = item
+            if section.key == "requested" and index == 1:
+                merged[item.ref].assigned = True
+    section.items = sorted(merged.values(), key=lambda item: item.updated_at, reverse=True)
+    section.error = None
+    section.loaded = True
+
+
+DETAIL_FIELDS = (
+    "review_decision",
+    "additions",
+    "deletions",
+    "comments",
+    "requested_directly",
+    "requested_teams",
+    "checks_state",
+    "details_loaded",
+)
+
+
+def carry_over_details(previous: dict[PRRef, PRSummary], items: list[PRSummary]) -> None:
+    """Keep showing the last known details of each row until fresh ones arrive."""
+    for item in items:
+        old = previous.get(item.ref)
+        if old is not None and old.details_loaded and not item.details_loaded:
+            for name in DETAIL_FIELDS:
+                setattr(item, name, getattr(old, name))
+            item.assigned = item.assigned or old.assigned
+
+
+async def load_details(backend: Backend, sections: list[InboxSection]) -> None:
+    """Fill in the slower per-PR fields (size, checks, reviewers) for every row."""
+    items = [item for section in sections for item in section.items]
+    if items:
+        await backend.pull_request_details(items)
 
 
 async def load_inbox(backend: Backend, sections: list[InboxSection]) -> None:
-    async def load(section: InboxSection) -> None:
-        try:
-            section.items = await backend.search_pull_requests(section.query)
-            section.error = None
-        except Exception as error:  # show the error in the tab rather than failing
-            section.error = str(error)
-        section.loaded = True
-
-    await asyncio.gather(*(load(section) for section in sections))
-    requested = next((s for s in sections if s.key == "requested"), None)
-    if requested is None:
-        return
-    # Only the "To review" search tells us reliably that a team request involves you.
-    wanted = {item.ref for item in requested.items}
-    for section in sections:
-        if section is requested:
-            continue
-        for item in section.items:
-            if item.ref not in wanted:
-                item.requested_teams = []
+    await asyncio.gather(*(load_section(backend, section) for section in sections))
+    await load_details(backend, sections)

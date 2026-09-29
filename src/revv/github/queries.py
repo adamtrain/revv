@@ -275,6 +275,8 @@ mutation RemoveReaction($input: RemoveReactionInput!) {
 }
 """
 
+# Deliberately light: per-PR fields like CI status, requested reviewers and diff size are
+# expensive for GitHub to compute, so they're fetched afterwards with PR_DETAILS.
 SEARCH_PULL_REQUESTS = """
 query SearchPRs($query: String!) {
   viewer { login }
@@ -282,17 +284,29 @@ query SearchPRs($query: String!) {
     issueCount
     nodes {
       ... on PullRequest {
-        number title isDraft createdAt updatedAt reviewDecision additions deletions headRefName
+        id number title isDraft createdAt updatedAt headRefName
         author { login }
         repository { name owner { login } }
-        comments { totalCount }
         labels(first: 6) { nodes { name color } }
-        reviewRequests(first: 20) {
-          nodes { requestedReviewer { __typename ... on User { login } ... on Team { combinedSlug } } }
-        }
         latestReviews(first: 30) { nodes { author { login } state } }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
+    }
+  }
+}
+"""
+
+PR_DETAILS = """
+query Details($ids: [ID!]!) {
+  viewer { login }
+  nodes(ids: $ids) {
+    ... on PullRequest {
+      id reviewDecision additions deletions
+      comments { totalCount }
+      assignees(first: 10) { nodes { login } }
+      reviewRequests(first: 20) {
+        nodes { requestedReviewer { __typename ... on User { login } ... on Team { combinedSlug } } }
+      }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
   }
 }
