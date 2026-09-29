@@ -18,7 +18,7 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
   edit, delete, and resolve or unresolve.
 - **Changes since your last review.** `L` narrows the diff to what changed since the
   commit you last reviewed, like GitHub's "changes since your last review".
-- **The conversation.** The description, every review thread at a glance, and the
+- **The conversation.** Pull requests open here (`"open_tab": "files"` changes that): the description, every review thread at a glance, and the
   timeline. Post general comments, and resolve them the way GitHub does (hide them as
   "resolved").
 - **Reviews the GitHub way.** Comments go into a pending review, just like "Start a review"
@@ -102,7 +102,8 @@ Settings live in `~/.config/revv/config.json` and are all optional:
   "nicknames": {"octocat": "Octo"},
   "inbox_sort": "asc",
   "refresh_interval": 30,
-  "sidebar_width": 34
+  "sidebar_width": 34,
+  "open_tab": "conversation"
 }
 ```
 

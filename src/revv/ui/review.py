@@ -184,6 +184,7 @@ class ReviewScreen(Screen):
         super().__init__()
         self.session = session
         self.from_inbox = from_inbox
+        self.initial_tab = "files" if setting("open_tab") == "files" else "conversation"
         self._busy = 0
         self._syncing = False
         self._save_timer = None
@@ -197,7 +198,7 @@ class ReviewScreen(Screen):
     def compose(self) -> ComposeResult:
         yield PRHeader(id="header")
         yield Static(id="banner")
-        with ContentSwitcher(initial="files", id="tabs"):
+        with ContentSwitcher(initial=self.initial_tab, id="tabs"):
             with Horizontal(id="files"):
                 with Vertical(id="sidebar"):
                     yield FileTree(id="tree")
@@ -234,9 +235,11 @@ class ReviewScreen(Screen):
         self._apply_sidebar_width(setting("sidebar_width"))
         kinds = setting("hide_by_default")
         self.diff.hidden_kinds = {k for k in kinds if k in ("test", "generated")}
+        self.header.tab = self.initial_tab
         self.header.show(None, f"Loading {self.session.ref}…")
         self.query_one("#files").loading = True
-        self.diff.focus()
+        if self.initial_tab == "files":
+            self.diff.focus()
         self.load()
 
     @work(exclusive=True, group="load")
@@ -288,6 +291,8 @@ class ReviewScreen(Screen):
         self.rebuild_tree()
         self.conversation.show(pr)
         self.header.show(pr)
+        if first and self.tab == "conversation":
+            self.call_after_refresh(self.conversation.focus_first)
         self.update_status()
         if not first:
             self._mark_hidden_viewed()

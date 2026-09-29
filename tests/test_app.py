@@ -21,12 +21,17 @@ from revv.ui.review import ReviewScreen
 SIZE = (140, 45)
 
 
-async def loaded(pilot: Pilot) -> ReviewScreen:
+async def loaded(pilot: Pilot, tab: str = "files") -> ReviewScreen:
+    """Wait for the review screen, then show the files tab (most tests are about the diff)."""
     for _ in range(100):
         screen = pilot.app.screen
-        if isinstance(screen, ReviewScreen) and screen.session.loaded and screen.diff.rows:
+        if isinstance(screen, ReviewScreen) and screen.session.loaded:
             await pilot.pause()
-            return screen
+            if tab == "files" and screen.tab != "files":
+                await pilot.press("1")
+                await pilot.pause()
+            if screen.diff.rows or tab != "files":
+                return screen
         await pilot.pause(0.02)
     raise AssertionError("review screen never loaded")
 
@@ -638,3 +643,17 @@ async def test_sidebar_width_is_adjustable_and_remembered(app: RevvApp) -> None:
     async with again.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
         assert screen.query_one("#sidebar").outer_size.width == start + 4
+
+
+async def test_opens_on_the_conversation_tab(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        await pilot.pause(0.1)
+        assert screen.tab == "conversation"
+        assert isinstance(app.focused, Card)
+        await pilot.press("1")
+        await pilot.pause()
+        assert screen.tab == "files" and screen.diff.rows and app.focused is screen.diff
+        # the diff opened at the first unviewed, visible file
+        section = screen.diff.current_section
+        assert section is not None and not section.file.is_viewed
