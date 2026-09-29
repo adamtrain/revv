@@ -105,6 +105,8 @@ class DiffView(ScrollView, can_focus=True):
         Binding("left_square_bracket", "next_file(-1)", "Prev file", show=False),
         Binding("n", "next_thread(1)", "Next thread", show=False),
         Binding("N", "next_thread(-1)", "Prev thread", show=False),
+        Binding("u", "next_thread(1, True)", "Next unresolved thread", show=False),
+        Binding("U", "next_thread(-1, True)", "Prev unresolved thread", show=False),
         Binding("enter", "activate", "Open/expand", show=False),
         Binding("z", "toggle_fold", "Fold", show=False),
         Binding("V", "select_mode", "Select lines", show=False),
@@ -721,17 +723,50 @@ class DiffView(ScrollView, can_focus=True):
             index += direction
         self.app.bell()
 
-    def action_next_thread(self, direction: int) -> None:
+    def _thread_order(self) -> list[tuple[tuple[int, float], ReviewThread]]:
+        """Every thread in reading order, including those in folded or hidden files."""
+        first_rows: dict[str, int] = {}
+        for index, row in enumerate(self.rows):
+            if row.kind is RowKind.THREAD and row.tline == 0 and row.thread is not None:
+                first_rows.setdefault(row.thread.id, index)
+        order: list[tuple[tuple[int, float], ReviewThread]] = []
+        for section in self.sections:
+            anchored = sorted(
+                (t for threads in section.line_threads.values() for t in threads),
+                key=lambda t: t.line or 0,
+            )
+            threads = [*section.file_threads, *section.loose_threads, *anchored]
+            base = self._starts[section.index] if section.index < len(self._starts) else 0
+            for ordinal, thread in enumerate(threads):
+                row = first_rows.get(thread.id)
+                position = float(row) if row is not None else base + 0.5 + ordinal / 1000
+                order.append(((section.index, position), thread))
+        order.sort(key=lambda entry: entry[0])
+        return order
+
+    def action_next_thread(self, direction: int, unresolved: bool = False) -> None:
+        """Jump to the next/previous comment thread (optionally only unresolved ones),
+        unfolding or revealing its file if needed, and wrapping around at the ends."""
         current = self.current_row
+        section = self.current_section
         current_thread = current.thread if current and current.kind is RowKind.THREAD else None
-        index = self.cursor + direction
-        while 0 <= index < len(self.rows):
-            row = self.rows[index]
-            if row.kind is RowKind.THREAD and row.thread is not current_thread and row.tline == 0:
-                self.set_cursor(index, top=False, center=True)
-                return
-            index += direction
-        self.app.bell()
+        here = (section.index if section else 0, float(self.cursor))
+        candidates = [
+            (key, thread)
+            for key, thread in self._thread_order()
+            if thread is not current_thread and not (unresolved and thread.is_resolved)
+        ]
+        if not candidates:
+            kind = "unresolved threads" if unresolved else "comment threads"
+            self.notify(f"No {kind} in this pull request", timeout=2)
+            return
+        if direction > 0:
+            ahead = [entry for entry in candidates if entry[0] > here]
+            target = ahead[0] if ahead else candidates[0]
+        else:
+            behind = [entry for entry in candidates if entry[0] < here]
+            target = behind[-1] if behind else candidates[-1]
+        self.jump_to_thread(target[1])
 
     def thread_row(self, thread: ReviewThread) -> int | None:
         for index, row in enumerate(self.rows):

@@ -67,6 +67,7 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `}` `{` | next / previous change |
 | `]` `[` | next / previous file |
 | `n` `N` | next / previous comment thread |
+| `u` `U` | next / previous unresolved thread |
 | `c` or `↵` | comment on the line (on a file header: comment on the file) |
 | `V` then `c` | comment on a range of lines |
 | `s` | suggest a change |

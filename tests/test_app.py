@@ -657,3 +657,33 @@ async def test_opens_on_the_conversation_tab(app: RevvApp) -> None:
         # the diff opened at the first unviewed, visible file
         section = screen.diff.current_section
         assert section is not None and not section.file.is_viewed
+
+
+async def test_thread_navigation_all_and_unresolved(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        diff = screen.diff
+        diff.set_cursor(0)
+        seen = []
+        for _ in range(len(screen.pr.threads)):
+            await pilot.press("n")
+            await pilot.pause()
+            row = diff.current_row
+            assert row is not None and row.kind is RowKind.THREAD and row.thread is not None
+            seen.append(row.thread.id)
+        assert set(seen) == {t.id for t in screen.pr.threads}  # every thread, hidden files too
+        assert "tests/test_retry.py" in {s.path for s in diff.visible_sections}
+        diff.set_cursor(0)
+        unresolved = []
+        for _ in range(8):
+            await pilot.press("u")
+            await pilot.pause()
+            row = diff.current_row
+            assert row is not None and row.thread is not None
+            assert not row.thread.is_resolved
+            unresolved.append(row.thread.id)
+        expected = {t.id for t in screen.pr.threads if not t.is_resolved}
+        assert set(unresolved) == expected  # and it wraps around
+        await pilot.press("U")
+        await pilot.pause()
+        assert diff.current_row is not None and not diff.current_row.thread.is_resolved  # type: ignore[union-attr]

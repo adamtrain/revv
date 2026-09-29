@@ -515,7 +515,7 @@ class ReviewScreen(Screen):
                     hints.append(("e", "edit"))
                 if comment is not None and comment.viewer_can_delete:
                     hints.append(("d", "delete"))
-                hints += [("+", "react"), ("z", "fold"), ("n", "next thread")]
+                hints += [("+", "react"), ("z", "fold"), ("n", "next"), ("u", "next unresolved")]
             elif row.is_code:
                 line = row.line_on(diff.cursor_side) if row.kind is RowKind.SPLIT else row.line
                 if line is not None and line.expanded:

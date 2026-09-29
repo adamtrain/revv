@@ -214,6 +214,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("} {", "next / previous change"),
             ("] [", "next / previous file"),
             ("n N", "next / previous comment thread"),
+            ("u U", "next / previous unresolved thread"),
             ("h l", "left / right side (side-by-side view)"),
             ("/", "search the changed lines…"),
             ("f", "go to file…"),
