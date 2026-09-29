@@ -72,7 +72,8 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `v` | mark the file as viewed and go to the next unviewed one |
 | `T` · `X` | show test files · generated files (they start hidden); again: hide them and mark them viewed |
 | `\|` | unified / side-by-side |
-| `/` | go to file |
+| `/` | search the changed lines |
+| `f` | go to file |
 | `S` · `A` | submit review · approve |
 | `C` | comment on the pull request |
 | `1` · `2` | files · conversation |

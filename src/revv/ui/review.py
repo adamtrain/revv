@@ -20,7 +20,7 @@ from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv.classify import GitAttributes
 from revv.config import display_name, set_nicknames, setting
-from revv.diff import LineKind
+from revv.diff import DiffLine, LineKind
 from revv.models import (
     Comment,
     Fingerprint,
@@ -48,6 +48,33 @@ from revv.ui.render import relative_time
 from revv.ui.widgets import PRHeader, StatusBar
 
 PREFETCH_LIMIT = 150  # fetch full file text up front for PRs with at most this many files
+
+
+class LineFinder(Provider):
+    """Fuzzy search over every changed line of the pull request."""
+
+    async def search(self, query: str) -> Hits:
+        screen = self.screen
+        if not isinstance(screen, ReviewScreen) or not query.strip():
+            return
+        matcher = self.matcher(query)
+        for count, (section, line) in enumerate(screen.diff.changed_lines()):
+            if count % 400 == 399:
+                await asyncio.sleep(0)  # stay responsive on huge pull requests
+            text = line.text.strip()
+            if not text:
+                continue
+            score = matcher.match(text)
+            if score > 0:
+                side, number = line.anchor
+                sign = "+" if line.kind is LineKind.ADD else "−"
+                yield Hit(
+                    score,
+                    matcher.highlight(text),
+                    partial(screen.go_to_line, section, line),
+                    help=f"{sign} {section.path}:{number}"
+                    + (" (old)" if side is Side.LEFT else ""),
+                )
 
 
 class FileFinder(Provider):
@@ -125,7 +152,8 @@ class ReviewScreen(Screen):
         Binding("1", "switch_tab('files')", "Files", show=False),
         Binding("2", "switch_tab('conversation')", "Conversation", show=False),
         Binding("t", "toggle_tree", "Tree", show=False),
-        Binding("slash,ctrl+k", "find_file", "Go to file", show=False),
+        Binding("slash", "search_lines", "Search changed lines", show=False),
+        Binding("f,ctrl+k", "find_file", "Go to file", show=False),
         Binding("c", "comment", "Comment", show=False),
         Binding("s", "suggest", "Suggest", show=False),
         Binding("r", "reply", "Reply", show=False),
@@ -508,6 +536,18 @@ class ReviewScreen(Screen):
         if not self.session.loaded:
             return
         self.app.push_screen(CommandPalette(providers=[FileFinder], placeholder="Go to file…"))
+
+    def action_search_lines(self) -> None:
+        if not self.session.loaded:
+            return
+        self.app.push_screen(
+            CommandPalette(providers=[LineFinder], placeholder="Search the changed lines…")
+        )
+
+    def go_to_line(self, section: FileSection, line: DiffLine) -> None:
+        self.action_switch_tab("files")
+        self.diff.jump_to_line(section, line)
+        self.diff.focus()
 
     def go_to_section(self, section: FileSection) -> None:
         self.action_switch_tab("files")

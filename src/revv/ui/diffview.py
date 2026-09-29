@@ -7,6 +7,7 @@ under the lines they belong to.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -642,6 +643,37 @@ class DiffView(ScrollView, can_focus=True):
         if self.is_hidden(section):
             section.force_visible = True
             self.post_message(self.SectionsChanged())
+
+    def changed_lines(self) -> Iterator[tuple[FileSection, DiffLine]]:
+        """Every added or deleted line of the pull request, in display order."""
+        for section in self.sections:
+            for hunk in section.hunks:
+                for line in hunk.lines:
+                    if line.kind is not LineKind.CONTEXT:
+                        yield section, line
+
+    def jump_to_line(self, section: FileSection, line: DiffLine) -> None:
+        """Show a diff line (unfolding or revealing its file if needed) and put the cursor on it."""
+        changed = False
+        if section.collapsed:
+            section.collapsed = False
+            changed = True
+        if self.is_hidden(section):
+            self._reveal(section)
+            changed = True
+        if changed:
+            self.relayout()
+        start = self._starts[section.index]
+        for index in range(start, len(self.rows)):
+            row = self.rows[index]
+            if row.section is not section:
+                break
+            if row.wrap == 0 and (row.line is line or row.right is line):
+                if self.split:
+                    self.cursor_side = Side.LEFT if row.right is not line else Side.RIGHT
+                self.set_cursor(index, center=True)
+                return
+        self.jump_to_section(section)
 
     def jump_to_section(self, section: FileSection) -> None:
         if self.is_hidden(section):

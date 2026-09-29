@@ -304,7 +304,7 @@ async def test_split_view_toggle(app: RevvApp) -> None:
 async def test_file_finder(app: RevvApp) -> None:
     async with app.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
-        await pilot.press("slash")
+        await pilot.press("f")
         await pilot.pause()
         await type_text(pilot, "badge.tsx")
         await pilot.pause(0.3)
@@ -524,3 +524,32 @@ async def test_inbox_sorting_stacks_and_ignoring(backend: DemoBackend) -> None:
         assert "github.com/acme/netkit#17" not in config.ignored_prs()
         assert inbox.current == "requested"
         assert all(isinstance(r, (Entry, StackHeader)) for r in inbox._arrange(inbox._items()[0]))
+
+
+async def test_search_changed_lines(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        await type_text(pilot, "AssertionError")
+        await pilot.pause(0.4)
+        await pilot.press("enter")
+        await pilot.pause()
+        row = screen.diff.current_row
+        assert row is not None and row.line is not None
+        assert "AssertionError" in row.line.text
+        assert row.section.path == "src/netkit/client.py"
+
+
+async def test_search_reveals_hidden_files(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        await type_text(pilot, "test_other_errors_are_not_retried")
+        await pilot.pause(0.4)
+        await pilot.press("enter")
+        await pilot.pause()
+        row = screen.diff.current_row
+        assert row is not None and row.section.path == "tests/test_retry.py"
+        assert "tests/test_retry.py" in screen.file_tree._path_nodes

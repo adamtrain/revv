@@ -80,7 +80,12 @@ class RevvApp(App[str | None]):
                 ("Submit review…", "Approve, request changes or comment", "submit"),
                 ("Approve…", "Approve these changes", "submit('APPROVE')"),
                 ("Comment on the pull request", "Add to the conversation", "general_comment"),
-                ("Go to file…", "Jump to a changed file", "find_file"),
+                ("Go to file…", "Jump to a changed file (f)", "find_file"),
+                (
+                    "Search changed lines…",
+                    "Fuzzy search every added or removed line (/)",
+                    "search_lines",
+                ),
                 ("Toggle side-by-side view", "Split or unified diff", "diff_split"),
                 ("Toggle file tree", "Show or hide the sidebar", "toggle_tree"),
                 ("Hide test files", "Mark them viewed and hide them (T)", "hide_kind('test')"),
