@@ -687,3 +687,18 @@ async def test_thread_navigation_all_and_unresolved(app: RevvApp) -> None:
         await pilot.press("U")
         await pilot.pause()
         assert diff.current_row is not None and not diff.current_row.thread.is_resolved  # type: ignore[union-attr]
+
+
+async def test_inbox_scope_toggle(backend: DemoBackend) -> None:
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        await pilot.press("a")  # all repositories
+        await pilot.pause(0.3)
+        assert inbox.all_repos and inbox.scope is None
+        await pilot.press("a")  # and back
+        await pilot.pause(0.3)
+        assert not inbox.all_repos
+        assert [s.key for s in inbox.sections] == ["requested", "reviewed", "mine"]

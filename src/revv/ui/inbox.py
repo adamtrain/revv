@@ -182,10 +182,10 @@ class InboxScreen(Screen):
                     section.items = items
                     section.loaded = True
         tabs = self.query_one(Tabs)
-        tabs.clear()
-        for section in self.sections:
-            tabs.add_tab(Tab(section.title, id=section.key))
-        tabs.add_tab(Tab("Ignored", id=IGNORED))
+        if not tabs.tab_count:  # the tabs are the same for every scope: create them once
+            for section in self.sections:
+                tabs.add_tab(Tab(section.title, id=section.key))
+            tabs.add_tab(Tab("Ignored", id=IGNORED))
         if self.current not in [s.key for s in self.sections] + [IGNORED]:
             self.current = self.sections[0].key
         tabs.active = self.current
