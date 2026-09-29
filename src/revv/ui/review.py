@@ -19,11 +19,13 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Static, Tree
 
+from revv import panc
 from revv.classify import GitAttributes
 from revv.config import display_name, save_config, set_nicknames, setting
 from revv.diff import DiffLine, LineKind, parse_patch
 from revv.models import (
     REACTION_EMOJI,
+    AiCheck,
     ChangedFile,
     Comment,
     Fingerprint,
@@ -190,6 +192,7 @@ class ReviewScreen(Screen):
         self._save_timer = None
         self._last_write = 0.0
         self._checking = False
+        self.ai_check: AiCheck | None = None  # panc's verdict on the description
         self.since: Review | None = None  # showing only the changes since this review
         self.since_files: list[ChangedFile] | None = None
 
@@ -296,6 +299,8 @@ class ReviewScreen(Screen):
         self.update_status()
         if not first:
             self._mark_hidden_viewed()
+        if setting("panc") and panc.executable() is not None:
+            self.check_description()
 
     def rebuild_tree(self) -> None:
         diff = self.diff
@@ -1297,6 +1302,43 @@ class ReviewScreen(Screen):
         when = relative_time(review.submitted_at)
         commit = (review.commit_oid or "")[:7]
         return f"⟲ Only changes since your last review ({when}, {commit}) · L shows everything"
+
+    # -- AI check of the description (panc) --------------------------------------------
+
+    def _show_ai(self, check: AiCheck | None, running: bool) -> None:
+        self.conversation.set_ai_check(check, running)
+        self.header.ai = check
+        self.header.refresh()
+
+    @work(exclusive=True, group="panc")
+    async def check_description(self) -> None:
+        """Run panc on the description, unless a cached result still fits it (<10% changed)."""
+        session = self.session
+        body = self.pr.body.strip()
+        if not body:
+            return
+        check = self.ai_check
+        if check is None and session.cache is not None:
+            check = await asyncio.to_thread(session.cache.load_ai_check, session.ref)
+        if check is not None:
+            self.ai_check = check
+            self._show_ai(check, running=False)
+            stale = panc.changed_enough(check.text, body)
+            retry_error = check.error is not None and time.time() - check.checked_at > 3600
+            if not stale and not retry_error:
+                return
+        if not session.fresh:
+            return  # wait for the sync with GitHub: the description may still change
+        self._show_ai(check, running=True)
+        result = await panc.check(body)
+        self.ai_check = result
+        if session.cache is not None:
+            await asyncio.to_thread(session.cache.save_ai_check, session.ref, result)
+        self._show_ai(result, running=False)
+        if result.error:
+            self.notify(result.error, title="panc", severity="warning", timeout=5)
+        else:
+            self.notify(f"{result.verdict.upper()}: {result.headline}", title="panc", timeout=4)
 
     # -- changes since your last review ----------------------------------------------
 

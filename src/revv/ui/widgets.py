@@ -7,7 +7,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 
 from revv.config import display_name
-from revv.models import PullRequest
+from revv.models import AiCheck, PullRequest
 from revv.ui.palette import Palette
 from revv.ui.render import relative_time
 
@@ -61,6 +61,7 @@ class PRHeader(Widget):
         self.message = "Loading…"
         self.syncing = False
         self.hidden: set[str] = set()  # paths of hidden (test/generated) files
+        self.ai: AiCheck | None = None  # panc's verdict on the description
 
     def show(self, pr: PullRequest | None, message: str = "") -> None:
         self.pr = pr
@@ -90,6 +91,18 @@ class PRHeader(Widget):
             )
             tabs.append(f"{label} ", style)
             tabs.append(" ")
+        if self.ai is not None and not self.ai.error and self.ai.verdict:
+            verdict = self.ai.verdict.strip()
+            color = {"ai": p.error, "human": p.success}.get(verdict.lower(), p.warning)
+            label = (
+                " HUMAN "
+                if verdict.lower() == "human"
+                else f" {verdict.upper()} {self.ai.fraction_ai:.0%} AI "
+            )
+            chip = Text(label, p.style(color.get_contrast_text(1.0), color, bold=True))
+            chip.append(" ")
+            chip.append_text(tabs)
+            tabs = chip
         top.truncate(max(10, width - tabs.cell_len - 1), overflow="ellipsis")
         top.pad_right(max(0, width - top.cell_len - tabs.cell_len))
         top.append_text(tabs)

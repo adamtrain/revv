@@ -327,6 +327,30 @@ class PullRequest:
         return sum(1 for t in self.threads if not t.is_resolved and not t.is_pending)
 
 
+@dataclass(slots=True)
+class AiSegment:
+    label: str
+    ai_score: float
+    confidence: str
+    excerpt: str
+    humanized: bool = False
+
+
+@dataclass(slots=True)
+class AiCheck:
+    """What panc (Pangram's AI detection) said about a pull request description."""
+
+    text: str  # the description that was checked
+    verdict: str = ""  # "AI", "Human" or "Mixed"
+    headline: str = ""
+    fraction_ai: float = 0.0
+    fraction_ai_assisted: float = 0.0
+    fraction_human: float = 0.0
+    segments: list[AiSegment] = field(default_factory=list)
+    checked_at: float = 0.0
+    error: str | None = None
+
+
 @dataclass(frozen=True)
 class Fingerprint:
     """What a pull request looks like at a glance, to notice changes on GitHub."""

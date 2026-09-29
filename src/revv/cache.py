@@ -24,7 +24,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from revv.models import PRRef, PullRequest, RepoRef
+from revv.models import AiCheck, PRRef, PullRequest, RepoRef
 
 
 def _schema() -> str:
@@ -144,6 +144,26 @@ class DiskCache:
 
     def save_blob(self, repo: RepoRef, oid: str, path: str, text: str | None) -> None:
         self._write(self.blob_path(repo, oid, path), text)
+
+    # -- AI checks of descriptions (panc) ---------------------------------------------
+
+    def ai_check_path(self, ref: PRRef) -> Path:
+        repo = ref.repo
+        return (
+            self.root
+            / "panc"
+            / _slug(repo.host)
+            / _slug(repo.owner)
+            / _slug(repo.name)
+            / f"{ref.number}.bin"
+        )
+
+    def load_ai_check(self, ref: PRRef) -> AiCheck | None:
+        value = self._read(self.ai_check_path(ref))
+        return value if isinstance(value, AiCheck) else None
+
+    def save_ai_check(self, ref: PRRef, check: AiCheck) -> None:
+        self._write(self.ai_check_path(ref), check)
 
     # -- inbox -----------------------------------------------------------------------
 

@@ -19,7 +19,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from revv.config import display_name
-from revv.models import Comment, PullRequest, Review, ReviewThread
+from revv.models import AiCheck, Comment, PullRequest, Review, ReviewThread
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
 
@@ -130,6 +130,8 @@ class ConversationView(VerticalScroll):
         self._palette: Palette | None = None
         self._md: MarkdownRenderer | None = None
         self._expanded: dict[str, bool] = {}
+        self.ai: AiCheck | None = None  # panc's verdict on the description
+        self.ai_running = False
 
     def on_mount(self) -> None:
         self.app.theme_changed_signal.subscribe(self, self._theme_changed)
@@ -201,6 +203,54 @@ class ConversationView(VerticalScroll):
                 if self.screen.focused is None or isinstance(self.screen.focused, Card):
                     card.focus()
                 return
+
+    def set_ai_check(self, check: AiCheck | None, running: bool) -> None:
+        self.ai, self.ai_running = check, running
+        self.version += 1
+        for card in self.query(Card):
+            if card.item.kind == "description":
+                card.invalidate()
+
+    def _ai_lines(self, width: int) -> list[Strip]:
+        """panc's verdict on the description, if it has run (or is running)."""
+        p = self.palette
+        bg = p.style(bg=p.bg)
+        check, running = self.ai, self.ai_running
+        if check is None and not running:
+            return []
+        lines = [self._render_text(Text("─" * width, p.style(p.faint, p.bg)), width, bg)]
+        if check is None:
+            text = Text(
+                "◌ panc is checking the description with Pangram…",
+                p.style(p.muted, p.bg, italic=True),
+            )
+            return [*lines, self._render_text(text, width, bg)]
+        if check.error:
+            text = Text(f"⚠ panc: {check.error}", p.style(p.warning_fg, p.bg))
+            return [*lines, self._render_text(text, width, bg)]
+        verdict = (check.verdict or "?").strip()
+        color = {"ai": p.error, "human": p.success}.get(verdict.lower(), p.warning)
+        text = Text()
+        text.append(f" {verdict.upper()} ", p.style(color.get_contrast_text(1.0), color, bold=True))
+        text.append("  panc · ", p.style(p.faint, p.bg))
+        text.append(f"{check.fraction_ai:.0%} AI", p.style(p.del_fg, p.bg))
+        text.append(f" · {check.fraction_ai_assisted:.0%} AI-assisted", p.style(p.warning_fg, p.bg))
+        text.append(f" · {check.fraction_human:.0%} human", p.style(p.add_fg, p.bg))
+        if check.headline:
+            text.append(f"  {check.headline}", p.style(p.muted, p.bg, italic=True))
+        if running:
+            text.append("  · checking the new description…", p.style(p.faint, p.bg, italic=True))
+        lines.append(self._render_text(text, width, bg))
+        flagged = sorted(check.segments, key=lambda s: s.ai_score, reverse=True)
+        for segment in [s for s in flagged if s.ai_score >= 0.5][:3]:
+            row = Text("   ", bg)
+            row.append(f"{segment.ai_score:.0%} ", p.style(p.del_fg, p.bg, bold=True))
+            row.append(f"{segment.confidence} ", p.style(p.faint, p.bg))
+            row.append(f"“{segment.excerpt}”", p.style(p.muted, p.bg, italic=True))
+            if segment.humanized:
+                row.append(" ⚑ humanized", p.style(p.warning_fg, p.bg))
+            lines.append(self._render_text(row, width, bg))
+        return lines
 
     def refresh_cards(self) -> None:
         self.version += 1
@@ -375,6 +425,7 @@ class ConversationView(VerticalScroll):
             reviewers.right_crop(3)
             for line in reviewers.wrap(self.md.console, inner):
                 body.append(self._render_text(line, inner, p.style(bg=p.bg)))
+        body += self._ai_lines(inner)
         return self._box(header, body, width, self._edge(focused), right if right else None)
 
     def _comment(self, comment: Comment, width: int, focused: bool, expanded: bool) -> list[Strip]:

@@ -104,9 +104,19 @@ Settings live in `~/.config/revv/config.json` and are all optional:
   "inbox_sort": "asc",
   "refresh_interval": 30,
   "sidebar_width": 34,
-  "open_tab": "conversation"
+  "open_tab": "conversation",
+  "panc": false
 }
 ```
+
+### AI-writing check with panc (optional)
+
+If you have [panc](https://github.com/adamtrain/panc) (Pangram's AI detection in your
+terminal) on your `PATH` and set `"panc": true`, revv runs it on each pull request's
+description in the background. The verdict shows on the description card in the
+conversation, with a chip in the header. Results are cached per pull request and only
+re-checked when the description changes by at least 10%. It's off by default because
+panc sends the description to Pangram (with your `PANGRAM_API_KEY`).
 
 ### What counts as a test or generated file
 

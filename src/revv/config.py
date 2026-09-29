@@ -29,6 +29,7 @@ DEFAULTS: dict[str, Any] = {
     "refresh_interval": 30,  # seconds between checks for changes on GitHub; 0 turns them off
     "sidebar_width": 34,  # columns of the file tree (< and > change it)
     "open_tab": "conversation",  # what a pull request opens on: "conversation" or "files"
+    "panc": False,  # check PR descriptions for AI writing with panc (sends them to Pangram)
 }
 
 IGNORED_PR_TTL = 180 * 86400  # forget ignored pull requests after half a year
