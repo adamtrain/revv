@@ -199,32 +199,28 @@ class ReviewScreen(Screen):
     # -- composition ---------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield PRHeader(id="header")
-        yield Static(id="banner")
-        with ContentSwitcher(initial=self.initial_tab, id="tabs"):
-            with Horizontal(id="files"):
-                with Vertical(id="sidebar"):
-                    yield FileTree(id="tree")
-                    yield Static(id="hidden-note")
-                yield DiffView(id="diff")
-            yield ConversationView(id="conversation")
-        yield StatusBar(id="status")
-
-    @property
-    def diff(self) -> DiffView:
-        return self.query_one(DiffView)
-
-    @property
-    def file_tree(self) -> FileTree:
-        return self.query_one(FileTree)
-
-    @property
-    def conversation(self) -> ConversationView:
-        return self.query_one(ConversationView)
-
-    @property
-    def header(self) -> PRHeader:
-        return self.query_one(PRHeader)
+        # Keep references rather than querying: callbacks that finish after the screen
+        # closed (e.g. a cancelled sync's cleanup) must not crash looking for widgets.
+        self.header = PRHeader(id="header")
+        self.banner = Static(id="banner")
+        self.switcher = ContentSwitcher(initial=self.initial_tab, id="tabs")
+        self.files_pane = Horizontal(id="files")
+        self.sidebar = Vertical(id="sidebar")
+        self.file_tree = FileTree(id="tree")
+        self.hidden_note = Static(id="hidden-note")
+        self.diff = DiffView(id="diff")
+        self.conversation = ConversationView(id="conversation")
+        self.status_bar = StatusBar(id="status")
+        yield self.header
+        yield self.banner
+        with self.switcher:
+            with self.files_pane:
+                with self.sidebar:
+                    yield self.file_tree
+                    yield self.hidden_note
+                yield self.diff
+            yield self.conversation
+        yield self.status_bar
 
     @property
     def pr(self) -> PullRequest:
@@ -232,7 +228,7 @@ class ReviewScreen(Screen):
 
     @property
     def tab(self) -> str:
-        return self.query_one(ContentSwitcher).current or "files"
+        return self.switcher.current or "files"
 
     def on_mount(self) -> None:
         self._apply_sidebar_width(setting("sidebar_width"))
@@ -240,7 +236,7 @@ class ReviewScreen(Screen):
         self.diff.hidden_kinds = {k for k in kinds if k in ("test", "generated")}
         self.header.tab = self.initial_tab
         self.header.show(None, f"Loading {self.session.ref}…")
-        self.query_one("#files").loading = True
+        self.files_pane.loading = True
         if self.initial_tab == "files":
             self.diff.focus()
         self.load()
@@ -250,7 +246,7 @@ class ReviewScreen(Screen):
         try:
             pr = await self.session.load()
         except Exception as error:
-            self.query_one("#files").loading = False
+            self.files_pane.loading = False
             self.header.show(None, f"Couldn't load {self.session.ref}: {error}")
             self.notify(
                 str(error), title="Couldn't load pull request", severity="error", timeout=10
@@ -270,7 +266,7 @@ class ReviewScreen(Screen):
         order = {path: i for i, path in enumerate(tree_order([f.path for f in pr.files]))}
         pr.files.sort(key=lambda f: order.get(f.path, 0))
         diff = self.diff
-        self.query_one("#files").loading = False
+        self.files_pane.loading = False
         if self.since_files is not None:
             # the diff shows only what changed since your last review
             since = self.since_files
@@ -307,7 +303,7 @@ class ReviewScreen(Screen):
         self.file_tree.build(diff.visible_sections)
         self.header.hidden = {s.path for s in diff.sections if diff.is_hidden(s)}
         self.header.refresh()
-        note = self.query_one("#hidden-note", Static)
+        note = self.hidden_note
         counts = diff.hidden_counts()
         if not counts:
             note.display = False
@@ -458,7 +454,7 @@ class ReviewScreen(Screen):
         self.update_status()
 
     def update_status(self) -> None:
-        status = self.query_one(StatusBar)
+        status = self.status_bar
         if not self.session.loaded:
             status.show([("q", "quit")])
             return
@@ -543,7 +539,7 @@ class ReviewScreen(Screen):
     # -- navigation ------------------------------------------------------------------
 
     def action_switch_tab(self, tab: str) -> None:
-        self.query_one(ContentSwitcher).current = tab
+        self.switcher.current = tab
         self.header.tab = tab
         self.header.refresh()
         if tab == "files":
@@ -556,11 +552,11 @@ class ReviewScreen(Screen):
 
     def _apply_sidebar_width(self, width: int) -> int:
         width = max(self.SIDEBAR_MIN, min(self.SIDEBAR_MAX, int(width)))
-        self.query_one("#sidebar").styles.width = width
+        self.sidebar.styles.width = width
         return width
 
     def action_sidebar_width(self, delta: int) -> None:
-        sidebar = self.query_one("#sidebar")
+        sidebar = self.sidebar
         if not sidebar.display:
             sidebar.display = True
         current = sidebar.styles.width.value if sidebar.styles.width else 34
@@ -569,7 +565,7 @@ class ReviewScreen(Screen):
         self.notify(f"File tree: {width} columns", timeout=1)
 
     def action_toggle_tree(self) -> None:
-        sidebar = self.query_one("#sidebar")
+        sidebar = self.sidebar
         sidebar.display = not sidebar.display
         if not sidebar.display and self.file_tree.has_focus:
             self.diff.focus()
@@ -1284,7 +1280,7 @@ class ReviewScreen(Screen):
     # -- noticing changes on GitHub -------------------------------------------------
 
     def show_banner(self, kind: str | None, detail: str = "") -> None:
-        banner = self.query_one("#banner", Static)
+        banner = self.banner
         banner.set_classes(kind or "")
         if kind is None and self.since is not None:
             kind = "since"

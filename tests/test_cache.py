@@ -155,3 +155,20 @@ def test_schema_fingerprint_tracks_model_fields() -> None:
 
     assert f"4-{cache_module._schema()}" == cache_module.FORMAT
     assert len(cache_module._schema()) == 16
+
+
+async def test_leaving_while_syncing_does_not_crash(tmp_path: Path) -> None:
+    """Closing a pull request while its background sync is running used to crash
+    ("No nodes match PRHeader"): the cancelled sync's cleanup looked for the header."""
+    cache = DiskCache(tmp_path)
+    cache.save_pr(await DemoBackend(latency=0).load_pull_request(DEMO_REF))
+    app = RevvApp(DemoBackend(latency=0.5), repo=DEMO_REF.repo, cache=cache)
+    async with app.run_test(size=(140, 45)) as pilot:
+        await pilot.pause(0.1)
+        app.open_review(DEMO_REF, from_inbox=True)
+        await pilot.pause(0.2)
+        screen = app.screen
+        assert isinstance(screen, ReviewScreen) and not screen.session.fresh  # syncing
+        await pilot.press("q")
+        await pilot.pause(1.0)
+        assert isinstance(app.screen, InboxScreen)
