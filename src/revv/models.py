@@ -205,6 +205,7 @@ class Review:
     minimized_reason: str | None = None
     comment_count: int = 0
     reactions: list[Reaction] = field(default_factory=list)
+    commit_oid: str | None = None  # the head commit the review was made on
 
     @property
     def is_resolved(self) -> bool:
@@ -291,6 +292,21 @@ class PullRequest:
             if review.state == "PENDING":
                 return review
         return None
+
+    @property
+    def viewer_last_review(self) -> Review | None:
+        """Your most recent submitted review (the base of "changes since your last review")."""
+        latest: Review | None = None
+        for review in self.reviews:
+            if not (review.viewer_did_author and review.state != "PENDING"):
+                continue
+            if review.commit_oid is None or review.submitted_at is None:
+                continue
+            if latest is None or (
+                latest.submitted_at and review.submitted_at > latest.submitted_at
+            ):
+                latest = review
+        return latest
 
     def file(self, path: str) -> ChangedFile | None:
         for f in self.files:

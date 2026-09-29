@@ -165,6 +165,15 @@ class GitHubBackend:
             results.update(part)
         return results
 
+    async def compare(self, pr: PullRequest, base: str, head: str) -> list[ChangedFile]:
+        repo = pr.ref.repo
+        response = await self.client.rest(
+            "GET",
+            f"/repos/{repo.owner}/{repo.name}/compare/{base}...{head}",
+            params={"per_page": 1},
+        )
+        return [merge_rest_file(None, item) for item in response.json().get("files") or []]
+
     async def fingerprint(self, ref: PRRef) -> Fingerprint:
         data = await self.client.graphql(
             q.FINGERPRINT, owner=ref.repo.owner, name=ref.repo.name, number=ref.number

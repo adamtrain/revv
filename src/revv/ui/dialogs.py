@@ -245,6 +245,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("1 2", "files / conversation"),
             ("|", "toggle side-by-side view"),
             ("E", "expand the whole file"),
+            ("L", "only the changes since your last review"),
             ("t", "toggle the file tree"),
             ("o", "open in the browser"),
             ("y", "copy file path and line"),

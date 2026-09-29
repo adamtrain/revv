@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from revv.models import (
+    ChangedFile,
     Comment,
     Fingerprint,
     PRRef,
@@ -30,6 +31,10 @@ class Backend(Protocol):
         self, pr: PullRequest, requests: list[tuple[str, str]]
     ) -> dict[tuple[str, str], str | None]:
         """Fetch file text for (oid, path) pairs; None for binary/missing/huge files."""
+        ...
+
+    async def compare(self, pr: PullRequest, base: str, head: str) -> list[ChangedFile]:
+        """Files (with patches) changed between two commits, e.g. since your last review."""
         ...
 
     async def fingerprint(self, ref: PRRef) -> Fingerprint:

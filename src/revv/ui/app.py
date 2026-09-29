@@ -88,6 +88,11 @@ class RevvApp(App[str | None]):
                 ),
                 ("Toggle side-by-side view", "Split or unified diff", "diff_split"),
                 ("Toggle file tree", "Show or hide the sidebar", "toggle_tree"),
+                (
+                    "Changes since my last review",
+                    "Only what changed since you reviewed (L)",
+                    "since_review",
+                ),
                 ("Hide test files", "Mark them viewed and hide them (T)", "hide_kind('test')"),
                 (
                     "Hide generated files",

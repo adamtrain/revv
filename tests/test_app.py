@@ -213,8 +213,8 @@ async def test_submit_review_publishes_pending_comments(app: RevvApp, backend: D
         await pilot.press("ctrl+s")
         await pilot.pause(0.2)
         assert screen.pr.pending_review is None
-        review = next(r for r in backend._pr.reviews if r.author == "you")
-        assert review.state == "APPROVED" and review.body == "Ship it"
+        review = next(r for r in backend._pr.reviews if r.author == "you" and r.body == "Ship it")
+        assert review.state == "APPROVED"
         assert all(not c.is_pending for t in backend._pr.threads for c in t.comments)
 
 
@@ -553,3 +553,38 @@ async def test_search_reveals_hidden_files(app: RevvApp) -> None:
         row = screen.diff.current_row
         assert row is not None and row.section.path == "tests/test_retry.py"
         assert "tests/test_retry.py" in screen.file_tree._path_nodes
+
+
+async def test_changes_since_last_review(app: RevvApp, backend: DemoBackend) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("L")
+        await pilot.pause(0.2)
+        assert screen.since is not None
+        paths = [s.path for s in screen.diff.sections]
+        assert paths == ["src/netkit/client.py", "web/src/components/StatusBadge.tsx"]
+        client = screen.diff.sections[0]
+        added = [ln.text for h in client.hunks for ln in h.lines if ln.kind is LineKind.ADD]
+        assert any("def delete" in text for text in added)
+        banner = screen.query_one("#banner")
+        assert banner.display and "since your last review" in str(banner.render())
+        # comment on a new line: allowed, it's part of the PR's diff too
+        goto(screen.diff, code_line("src/netkit/client.py", "def delete(self, path: str)"))
+        await pilot.press("c")
+        await pilot.pause()
+        assert isinstance(app.screen, CommentEditor)
+        await type_text(pilot, "New since last time")
+        await pilot.press("ctrl+s")
+        await pilot.pause(0.2)
+        assert any(t.root and t.root.body == "New since last time" for t in screen.pr.threads)
+        # marking viewed updates the pull request's own file
+        screen.diff.jump_to_section(client)
+        await pilot.press("v")
+        await pilot.pause(0.2)
+        assert screen.pr.file("src/netkit/client.py").is_viewed  # type: ignore[union-attr]
+        assert backend._pr.file("src/netkit/client.py").is_viewed  # type: ignore[union-attr]
+        await pilot.press("L")
+        await pilot.pause(0.2)
+        assert screen.since is None
+        assert len(screen.diff.sections) == 11
+        assert not banner.display

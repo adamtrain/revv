@@ -16,6 +16,8 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 - **Comments where they belong.** Threads appear inline under their lines. You can comment
   on a line, a range, or a whole file, suggest changes (```` ```suggestion ````), reply,
   edit, delete, and resolve or unresolve.
+- **Changes since your last review.** `L` narrows the diff to what changed since the
+  commit you last reviewed, like GitHub's "changes since your last review".
 - **The conversation.** The description, every review thread at a glance, and the
   timeline. Post general comments, and resolve them the way GitHub does (hide them as
   "resolved").
@@ -72,6 +74,7 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `v` | mark the file as viewed and go to the next unviewed one |
 | `T` · `X` | show test files · generated files (they start hidden); again: hide them and mark them viewed |
 | `\|` | unified / side-by-side |
+| `L` | only the changes since your last review (again: everything) |
 | `/` | search the changed lines |
 | `f` | go to file |
 | `S` · `A` | submit review · approve |

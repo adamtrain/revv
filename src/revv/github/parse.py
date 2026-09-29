@@ -148,6 +148,7 @@ def parse_review(node: Json) -> Review:
         minimized_reason=node.get("minimizedReason"),
         comment_count=(node.get("comments") or {}).get("totalCount", 0),
         reactions=parse_reactions(node.get("reactionGroups")),
+        commit_oid=(node.get("commit") or {}).get("oid"),
     )
 
 

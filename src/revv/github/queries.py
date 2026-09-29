@@ -41,6 +41,7 @@ REVIEW_FIELDS = f"""
 fragment ReviewFields on PullRequestReview {{
   id state body createdAt submittedAt url
   author {{ login }}
+  commit {{ oid }}
   viewerCanUpdate viewerCanDelete viewerCanMinimize viewerCanUnminimize viewerDidAuthor
   isMinimized minimizedReason
   comments {{ totalCount }}

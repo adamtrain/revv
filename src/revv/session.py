@@ -7,6 +7,7 @@ update the local model from the API's response, so the UI can simply re-render.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Iterable
 
 from revv.backend import Backend
@@ -38,6 +39,7 @@ class ReviewSession:
         self._contents: dict[tuple[str, str], str | None] = {}
         self._inflight: dict[tuple[str, str], asyncio.Future[str | None]] = {}
         self._review_lock = asyncio.Lock()
+        self._compare_cache: dict[tuple[str, str], list[ChangedFile]] = {}
 
     @property
     def pr(self) -> PullRequest:
@@ -64,6 +66,25 @@ class ReviewSession:
         self.fresh = True
         self.save()
         return self._pr
+
+    async def changes_since_last_review(self) -> tuple[Review, list[ChangedFile]] | None:
+        """What changed since your last submitted review (None if you haven't reviewed)."""
+        pr = self.pr
+        review = pr.viewer_last_review
+        if review is None or review.commit_oid is None:
+            return None
+        key = (review.commit_oid, pr.head_oid)
+        files = self._compare_cache.get(key)
+        if files is None:
+            files = await self.backend.compare(pr, review.commit_oid, pr.head_oid)
+            self._compare_cache[key] = files
+        viewed = {f.path: f.viewed for f in pr.files}
+        copies = []
+        for file in files:
+            copy = dataclasses.replace(file)
+            copy.viewed = viewed.get(file.path, ViewedState.UNVIEWED)
+            copies.append(copy)
+        return review, copies
 
     async def fingerprint(self) -> Fingerprint:
         return await self.backend.fingerprint(self.ref)

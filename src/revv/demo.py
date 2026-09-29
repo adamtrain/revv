@@ -180,6 +180,20 @@ class Client:
         return self.request("DELETE", path)
 '''
 
+# client.py as it was when you last reviewed (before `delete` was added)
+CLIENT_AT_REVIEW = (
+    CLIENT_NEW.replace(
+        """
+
+    def delete(self, path: str) -> Response:
+        return self.request("DELETE", path)
+""",
+        "\n",
+    ).rstrip("\n")
+    + "\n"
+)
+REVIEWED_OID = "8a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+
 RETRY_NEW = '''\
 """Retry policies with exponential backoff and jitter."""
 
@@ -605,6 +619,18 @@ class DemoBackend:
             submitted_at=NOW - timedelta(hours=18),
             comment_count=2,
         )
+        earlier = Review(
+            id=self._id("PRR"),
+            author=VIEWER,
+            state="COMMENTED",
+            body="First pass: the policy looks good, a couple of questions to follow.",
+            created_at=NOW - timedelta(hours=23),
+            submitted_at=NOW - timedelta(hours=23),
+            viewer_can_update=True,
+            viewer_can_minimize=True,
+            viewer_did_author=True,
+            commit_oid=REVIEWED_OID,
+        )
         pending = Review(
             id=self._id("PRR"),
             author=VIEWER,
@@ -825,7 +851,7 @@ class DemoBackend:
             files=changed,
             threads=threads,
             comments=comments,
-            reviews=[review_mona, review_hubot, pending],
+            reviews=[earlier, review_mona, review_hubot, pending],
             commits=commits,
             total_commits=len(commits),
         )
@@ -844,6 +870,28 @@ class DemoBackend:
     ) -> dict[tuple[str, str], str | None]:
         await self._wait()
         return {(oid, path): self._texts.get(path) for oid, path in requests}
+
+    async def compare(self, pr: PullRequest, base: str, head: str) -> list[ChangedFile]:
+        await self._wait()
+        if base != REVIEWED_OID:
+            return []
+        files = []
+        for path, old, new in (
+            ("src/netkit/client.py", CLIENT_AT_REVIEW, CLIENT_NEW),
+            ("web/src/components/StatusBadge.tsx", BADGE_OLD, BADGE_NEW),
+        ):
+            patch = make_patch(old, new)
+            lines = patch.splitlines()
+            files.append(
+                ChangedFile(
+                    path=path,
+                    status=FileStatus.MODIFIED,
+                    additions=sum(1 for ln in lines if ln.startswith("+")),
+                    deletions=sum(1 for ln in lines if ln.startswith("-")),
+                    patch=patch,
+                )
+            )
+        return files
 
     async def fingerprint(self, ref: PRRef) -> Fingerprint:
         await self._wait()

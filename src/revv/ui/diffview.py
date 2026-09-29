@@ -157,6 +157,7 @@ class DiffView(ScrollView, can_focus=True):
         self._nw = 4
         self.pending_jump: FileSection | None = None  # applied after the first real layout
         self.hidden_kinds: set[str] = set()  # e.g. {"test", "generated"}
+        self.since_mode = False  # showing only the changes since your last review
         self.attributes: GitAttributes | None = None  # linguist-generated rules
         self.auto_split = True  # choose side-by-side on the first layout if there's room
 
@@ -241,7 +242,13 @@ class DiffView(ScrollView, can_focus=True):
         for thread in self.pr.threads:
             by_path.setdefault(thread.path, []).append(thread)
         for section in self.sections:
-            section.set_threads(by_path.get(section.path, []))
+            threads = by_path.get(section.path, [])
+            if self.since_mode:
+                # Old-side lines refer to a different base here; only new-side threads fit.
+                threads = [t for t in threads if t.is_file_level or t.side is Side.RIGHT]
+            section.set_threads(threads)
+            if self.since_mode:
+                section.loose_threads = []
         self.relayout()
 
     # -- layout ------------------------------------------------------------------

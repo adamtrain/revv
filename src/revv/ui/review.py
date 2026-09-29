@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import time
 from datetime import UTC, datetime
@@ -20,8 +21,9 @@ from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv.classify import GitAttributes
 from revv.config import display_name, set_nicknames, setting
-from revv.diff import DiffLine, LineKind
+from revv.diff import DiffLine, LineKind, parse_patch
 from revv.models import (
+    ChangedFile,
     Comment,
     Fingerprint,
     PullRequest,
@@ -168,6 +170,7 @@ class ReviewScreen(Screen):
         Binding("o", "open_browser", "Open in browser", show=False),
         Binding("y", "copy_location", "Copy location", show=False),
         Binding("at", "nicknames", "Nicknames", show=False),
+        Binding("L", "since_review", "Since last review", show=False),
         Binding("T", "hide_kind('test')", "Hide tests", show=False),
         Binding("X", "hide_kind('generated')", "Hide generated", show=False),
     ]
@@ -181,6 +184,8 @@ class ReviewScreen(Screen):
         self._save_timer = None
         self._last_write = 0.0
         self._checking = False
+        self.since: Review | None = None  # showing only the changes since this review
+        self.since_files: list[ChangedFile] | None = None
 
     # -- composition ---------------------------------------------------------------
 
@@ -254,7 +259,14 @@ class ReviewScreen(Screen):
         pr.files.sort(key=lambda f: order.get(f.path, 0))
         diff = self.diff
         self.query_one("#files").loading = False
-        diff.load(pr, keep_state=not first)
+        if self.since_files is not None:
+            # the diff shows only what changed since your last review
+            since = self.since_files
+            order = {path: i for i, path in enumerate(tree_order([f.path for f in since]))}
+            since.sort(key=lambda f: order.get(f.path, 0))
+            diff.load(dataclasses.replace(pr, files=since), keep_state=not first)
+        else:
+            diff.load(pr, keep_state=not first)
         if first:
             # start at the first file that still needs looking at
             target = next(
@@ -742,6 +754,24 @@ class ReviewScreen(Screen):
         path = selection.section.path
         start_side, start = selection.start
         end_side, end = selection.end
+        if self.since is not None:
+            anchors = [selection.anchor(line) for line in selection.lines]
+            if any(side is Side.LEFT for side, _ in anchors):
+                self.notify(
+                    "Old lines here are from your last review, not the PR's base: press L "
+                    "to comment on them in the full diff",
+                    severity="warning",
+                    timeout=4,
+                )
+                return
+            if not self._in_pull_request_diff(path, anchors):
+                self.notify(
+                    "Those lines aren't part of the pull request's diff, so GitHub won't take "
+                    "a comment there",
+                    severity="warning",
+                    timeout=4,
+                )
+                return
         suggestion = self._suggestion_text(selection)
         initial = (
             f"```suggestion\n{suggestion}\n```\n" if suggest and suggestion is not None else ""
@@ -1004,7 +1034,9 @@ class ReviewScreen(Screen):
     @work(group="viewed")
     async def toggle_viewed(self, section: FileSection) -> None:
         viewed = not section.file.is_viewed
-        task = await self._optimistic(self.session.set_viewed(section.file, viewed))
+        target = self._pr_file(section)
+        task = await self._optimistic(self.session.set_viewed(target, viewed))
+        section.file.viewed = target.viewed
         diff = self.diff
         if viewed:
             section.collapsed = True
@@ -1071,10 +1103,12 @@ class ReviewScreen(Screen):
 
     @work(group="viewed")
     async def mark_sections_viewed(self, sections: list[FileSection], label: str, key: str) -> None:
-        files = [s.file for s in sections if not s.file.is_viewed]
+        files = [self._pr_file(s) for s in sections if not s.file.is_viewed]
         ok = True
         if files:
             ok = await self._run("mark files as viewed", self.session.set_viewed_many(files, True))
+        for section in sections:
+            section.file.viewed = self._pr_file(section).viewed
         self.file_tree.refresh_labels()
         self.header.show(self.pr)
         self.update_status()
@@ -1090,6 +1124,10 @@ class ReviewScreen(Screen):
             )
         else:
             self.notify(f"Hid {hidden} {label} file{plural} ({key} shows them again)", timeout=3)
+
+    def _pr_file(self, section: FileSection) -> ChangedFile:
+        """The pull request's own record of a file (the diff may show a comparison copy)."""
+        return self.pr.file(section.path) or section.file
 
     def _mark_hidden_viewed(self) -> None:
         """After a refresh, newly pushed files of a hidden kind get marked as viewed too."""
@@ -1165,7 +1203,10 @@ class ReviewScreen(Screen):
             self._syncing = False
             self.header.syncing = False
             self.header.refresh()
-        self._present(pr)
+        if self.since is not None:
+            self.show_since_review(quiet=True)  # recompute against the new head
+        else:
+            self._present(pr)
         self.show_banner(None)
         self.prefetch()
         if not quiet:
@@ -1176,6 +1217,8 @@ class ReviewScreen(Screen):
     def show_banner(self, kind: str | None, detail: str = "") -> None:
         banner = self.query_one("#banner", Static)
         banner.set_classes(kind or "")
+        if kind is None and self.since is not None:
+            kind = "since"
         if kind is None:
             banner.display = False
             return
@@ -1186,9 +1229,78 @@ class ReviewScreen(Screen):
             "cached": f"◷ Showing the cached copy{age} · syncing with GitHub…",
             "offline": f"⚠ Couldn't reach GitHub · showing the cached copy{age} · R to retry",
             "changed": f"↻ Updated on GitHub: {detail} · press R to refresh",
+            "since": self._since_text(),
         }[kind]
         banner.update(text)
         banner.display = True
+
+    def _since_text(self) -> str:
+        review = self.since
+        if review is None:
+            return ""
+        when = relative_time(review.submitted_at)
+        commit = (review.commit_oid or "")[:7]
+        return f"⟲ Only changes since your last review ({when}, {commit}) · L shows everything"
+
+    # -- changes since your last review ----------------------------------------------
+
+    def action_since_review(self) -> None:
+        if not self._ready():
+            return
+        if self.since is not None:
+            self.since = None
+            self.since_files = None
+            self.diff.since_mode = False
+            self._present(self.pr)
+            self.show_banner(None)
+            self.notify("Showing all changes", timeout=1.5)
+            return
+        self.show_since_review()
+
+    @work(exclusive=True, group="since")
+    async def show_since_review(self, quiet: bool = False) -> None:
+        try:
+            result = await self.session.changes_since_last_review()
+        except Exception as error:
+            self.notify(
+                str(error), title="Couldn't compare with your last review", severity="error"
+            )
+            return
+        if result is None:
+            self.notify("You haven't submitted a review on this pull request yet", timeout=3)
+            return
+        review, files = result
+        if not files:
+            if not quiet:
+                self.notify("Nothing changed since your last review 🎉", timeout=3)
+            if self.since is not None:
+                self.since, self.since_files = None, None
+                self.diff.since_mode = False
+                self._present(self.pr)
+                self.show_banner(None)
+            return
+        self.since, self.since_files = review, files
+        self.diff.since_mode = True
+        self.action_switch_tab("files")
+        self._present(self.pr)
+        self.show_banner(None)  # shows the "since" banner
+        first = next((s for s in self.diff.sections if not self.diff.is_hidden(s)), None)
+        if first is not None and not quiet:
+            self.diff.jump_to_section(first)
+
+    def _in_pull_request_diff(self, path: str, anchors: list[tuple[Side, int]]) -> bool:
+        """Whether lines can be commented on: they must be part of the PR's own diff."""
+        file = self.pr.file(path)
+        if file is None or file.patch is None:
+            return False
+        valid: set[tuple[Side, int]] = set()
+        for hunk in parse_patch(file.patch):
+            for line in hunk.lines:
+                if line.kind is not LineKind.ADD and line.old_no is not None:
+                    valid.add((Side.LEFT, line.old_no))
+                if line.kind is not LineKind.DEL and line.new_no is not None:
+                    valid.add((Side.RIGHT, line.new_no))
+        return all(anchor in valid for anchor in anchors)
 
     def on_click(self, event) -> None:
         widget = getattr(event, "widget", None)
