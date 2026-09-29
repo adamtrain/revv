@@ -31,7 +31,9 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 - **Viewed files.** Mark files as viewed (synced with GitHub's checkbox) and move on to the
   next unviewed one; the header shows how far along you are, weighted by changed lines.
   Test files and generated files are hidden by default (`T` / `X` show them).
-- **Nicknames.** Press `@` to give people the names you'd rather see than their logins.
+- **Nicknames.** Press `@` to give the people in whatever is selected (a pull request's
+  author, a thread's participants, the reviewers of the description) the names you'd
+  rather see than their logins.
 
 ## Install
 

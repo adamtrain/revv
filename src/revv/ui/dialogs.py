@@ -341,18 +341,15 @@ class NicknameDialog(ModalScreen[dict[str, str] | None]):
 
     def __init__(self, logins: list[str], nicknames: dict[str, str]) -> None:
         super().__init__()
-        known = {login.lower(): login for login in logins}
-        for login in nicknames:
-            known.setdefault(login.lower(), login)
-        self.logins = sorted(known.values(), key=str.lower)
+        unique = {login.lower(): login for login in logins if login and "/" not in login}
+        self.logins = list(unique.values())
         self.nicknames = {login.lower(): name for login, name in nicknames.items()}
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
-            box.border_title = "Nicknames"
+            box.border_title = "Nickname" if len(self.logins) == 1 else "Nicknames"
             yield Static(
-                "Shown instead of GitHub logins, only to you. Leave a field empty to "
-                "use the login.",
+                "Shown instead of the GitHub login, only to you. Leave it empty to use the login.",
                 id="intro",
             )
             with VerticalScroll():
@@ -387,8 +384,8 @@ class NicknameDialog(ModalScreen[dict[str, str] | None]):
         self.action_save()
 
     def action_save(self) -> None:
-        names = {str(field.name): field.value.strip() for field in self.query(Input)}
-        self.dismiss({login: name for login, name in names.items() if name})
+        """Returns every shown login with its (possibly empty, meaning "none") nickname."""
+        self.dismiss({str(field.name): field.value.strip() for field in self.query(Input)})
 
     def action_cancel(self) -> None:
         self.dismiss(None)

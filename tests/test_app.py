@@ -458,17 +458,9 @@ async def test_nicknames(app: RevvApp) -> None:
 
     from revv import config
 
+    config.set_nicknames({"hubot": "Robot"})
     async with app.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
-        await pilot.press("at")
-        await pilot.pause()
-        dialog = app.screen
-        field = next(f for f in dialog.query(Input) if f.name == "mona")
-        field.value = "Mona Lisa"
-        await pilot.press("ctrl+s")
-        await pilot.pause()
-        assert config.display_name("mona") == "Mona Lisa"
-        assert config.load_config()["nicknames"] == {"mona": "Mona Lisa"}
         thread = next(
             t
             for t in screen.pr.threads
@@ -476,13 +468,50 @@ async def test_nicknames(app: RevvApp) -> None:
         )
         screen.diff.jump_to_thread(thread)
         await pilot.pause()
+        await pilot.press("at")  # the people in the thread under the cursor
+        await pilot.pause()
+        dialog = app.screen
+        names = sorted(str(f.name) for f in dialog.query(Input))
+        assert names == sorted({c.author for c in thread.comments})
+        field = next(f for f in dialog.query(Input) if f.name == "mona")
+        field.value = "Mona Lisa"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert config.display_name("mona") == "Mona Lisa"
+        # other nicknames are kept
+        assert config.load_config()["nicknames"] == {"hubot": "Robot", "mona": "Mona Lisa"}
         rendered = screen.diff._render_thread(
-            screen.diff.current_section,
+            screen.diff.current_section,  # type: ignore[arg-type]
             thread,
             None,
-            False,  # type: ignore[arg-type]
+            False,
         )
         assert "Mona Lisa" in rendered.strips[0].text
+        # on the description card: the author and every reviewer
+        await pilot.press("2")
+        await pilot.pause()
+        description = next(c for c in screen.query(Card) if c.item.kind == "description")
+        description.focus()
+        await pilot.press("at")
+        await pilot.pause()
+        names = [str(f.name) for f in app.screen.query(Input)]
+        assert names[0] == screen.pr.author
+        assert {"mona", "hubot", "you"} <= set(names)
+        await pilot.press("escape")
+
+
+async def test_inbox_nickname_is_for_the_highlighted_author(backend: DemoBackend) -> None:
+    from textual.widgets import Input, OptionList
+
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        options = app.screen.query_one(OptionList)
+        options.highlighted = options.get_option_index("github.com/acme/netkit#42")
+        await pilot.press("at")
+        await pilot.pause()
+        assert [str(f.name) for f in app.screen.query(Input)] == ["octocat"]
+        await pilot.press("escape")
 
 
 async def test_inbox_sorting_stacks_and_ignoring(backend: DemoBackend) -> None:

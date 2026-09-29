@@ -22,7 +22,14 @@ from textual.widgets.option_list import Option
 
 from revv.backend import Backend
 from revv.cache import DiskCache
-from revv.config import display_name, ignored_prs, save_config, set_ignored, set_nicknames, setting
+from revv.config import (
+    display_name,
+    ignored_prs,
+    save_config,
+    set_ignored,
+    setting,
+    update_nicknames,
+)
 from revv.inbox import (
     InboxSection,
     carry_over_details,
@@ -732,12 +739,17 @@ class InboxScreen(Screen):
 
     @work(group="nicknames")
     async def edit_nicknames(self) -> None:
-        people = sorted({item.author for s in self.sections for item in s.items})
-        result = await self.app.push_screen_wait(NicknameDialog(people, setting("nicknames")))
+        item = self._highlighted()
+        if item is None:
+            self.notify("Highlight a pull request to nickname its author", timeout=2)
+            return
+        result = await self.app.push_screen_wait(
+            NicknameDialog([item.author], setting("nicknames"))
+        )
         if result is not None:
-            set_nicknames(result)
+            update_nicknames(result)
             self._render_list()
-            self.notify("Nicknames saved", timeout=1.5)
+            self.notify("Nickname saved", timeout=1.5)
 
     def action_help(self) -> None:
         self.notify(

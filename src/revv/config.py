@@ -88,10 +88,20 @@ def display_name(login: str) -> str:
 
 
 def set_nicknames(names: dict[str, str]) -> None:
+    """Replace all nicknames."""
     global _nicknames
     cleaned = {login: name.strip() for login, name in names.items() if name.strip()}
     save_config(nicknames=cleaned)
     _nicknames = {login.lower(): name for login, name in cleaned.items()}
+
+
+def update_nicknames(changes: dict[str, str]) -> None:
+    """Set (or, with an empty name, remove) the nicknames of some people, keeping the rest."""
+    current = {str(k): str(v) for k, v in setting("nicknames").items()}
+    lowered = {login.lower() for login in changes}
+    merged = {k: v for k, v in current.items() if k.lower() not in lowered}
+    merged |= {login: name for login, name in changes.items() if name.strip()}
+    set_nicknames(merged)
 
 
 # -- ignored pull requests ---------------------------------------------------------

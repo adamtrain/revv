@@ -21,7 +21,7 @@ from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv import panc
 from revv.classify import GitAttributes
-from revv.config import display_name, save_config, set_nicknames, setting
+from revv.config import display_name, save_config, setting, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
 from revv.models import (
     REACTION_EMOJI,
@@ -603,29 +603,39 @@ class ReviewScreen(Screen):
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen())
 
-    def _people(self) -> list[str]:
-        if not self.session.loaded:
-            return []
+    def _people_here(self) -> list[str]:
+        """Who `@` renames: the people in whatever is selected."""
         pr = self.pr
-        people = {pr.author, *pr.review_requests, *pr.latest_reviews}
-        people |= {c.author for c in pr.comments}
-        people |= {r.author for r in pr.reviews}
-        people |= {c.author for t in pr.threads for c in t.comments}
-        return sorted(login for login in people if login and "/" not in login)
+
+        def authors(thread: ReviewThread) -> list[str]:
+            return list(dict.fromkeys(c.author for c in thread.comments))
+
+        if self.tab == "conversation":
+            item = self.conversation.focused_item
+            if item is None or item.kind == "description":
+                return [pr.author, *ConversationView.reviewer_logins(pr)]
+            if isinstance(item.obj, ReviewThread):
+                return authors(item.obj)
+            return [getattr(item.obj, "author", pr.author)]
+        thread = self.diff.active_thread
+        if thread is not None:
+            return authors(thread)
+        return [pr.author]
 
     def action_nicknames(self) -> None:
         self.edit_nicknames()
 
     @work(group="nicknames")
     async def edit_nicknames(self) -> None:
-        result = await self.app.push_screen_wait(
-            NicknameDialog(self._people(), setting("nicknames"))
-        )
+        if not self.session.loaded:
+            return
+        people = self._people_here()
+        result = await self.app.push_screen_wait(NicknameDialog(people, setting("nicknames")))
         if result is None:
             return
-        set_nicknames(result)
+        update_nicknames(result)
         self.refresh_names()
-        self.notify("Nicknames saved", timeout=1.5)
+        self.notify("Nickname saved" if len(result) == 1 else "Nicknames saved", timeout=1.5)
 
     def refresh_names(self) -> None:
         """Re-render everything that shows people's names."""

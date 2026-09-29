@@ -401,32 +401,67 @@ class ConversationView(VerticalScroll):
             right.append(f" {label.name} ", p.style(color.get_contrast_text(1.0), color))
             right.append(" ", p.style(bg=p.bg))
         inner = width - 4
-        body = self._markdown(pr.body, inner)
+        bg = p.style(bg=p.bg)
+        people = self._reviewer_lines(pr)
+        side = min(38, max(24, max((line.cell_len for line in people), default=0) + 1))
+        if people and inner - side - 3 >= 48:
+            # reviewers in a column to the right of the description
+            left_width = inner - side - 3
+            left = self._markdown(pr.body, left_width)
+            column = [self._render_text(line, side, bg) for line in people]
+            divider = Segment(" │ ", p.style(p.fg_mix(0.15), p.bg))
+            body = [
+                Strip.join(
+                    [
+                        (
+                            left[i] if i < len(left) else Strip.blank(left_width, bg)
+                        ).adjust_cell_length(left_width, bg),
+                        Strip([divider]),
+                        (
+                            column[i] if i < len(column) else Strip.blank(side, bg)
+                        ).adjust_cell_length(side, bg),
+                    ]
+                )
+                for i in range(max(len(left), len(column)))
+            ]
+        else:
+            body = self._markdown(pr.body, inner)
+            if people:
+                body.append(Strip.blank(inner, bg))
+                body += [self._render_text(line, inner, bg) for line in people]
         body += self._reactions(pr, inner)
-        body.append(Strip.blank(inner, p.style(bg=p.bg)))
-        reviewers = Text("Reviewers: ", p.style(p.faint, p.bg))
-        seen = set()
-        for login, state in pr.latest_reviews.items():
-            verb, tone = REVIEW_VERBS.get(state, (state.lower(), "muted"))
-            color = {"success": p.add_fg, "error": p.del_fg, "warning": p.warning_fg}.get(
-                tone, p.muted
-            )
-            reviewers.append(display_name(login), p.style(p.author_color(login), p.bg, bold=True))
-            reviewers.append(f" {verb}", p.style(color, p.bg))
-            reviewers.append(" · ", p.style(p.faint, p.bg))
-            seen.add(login)
-        for login in pr.review_requests:
-            if login in seen:
-                continue
-            reviewers.append(display_name(login), p.style(p.author_color(login), p.bg, bold=True))
-            reviewers.append(" requested", p.style(p.warning_fg, p.bg))
-            reviewers.append(" · ", p.style(p.faint, p.bg))
-        if len(reviewers) > len("Reviewers: "):
-            reviewers.right_crop(3)
-            for line in reviewers.wrap(self.md.console, inner):
-                body.append(self._render_text(line, inner, p.style(bg=p.bg)))
         body += self._ai_lines(inner)
         return self._box(header, body, width, self._edge(focused), right if right else None)
+
+    @staticmethod
+    def reviewer_logins(pr: PullRequest) -> list[str]:
+        """Everyone in the reviewers table: who reviewed, then who's still requested."""
+        logins = list(pr.latest_reviews)
+        logins += [login for login in pr.review_requests if login not in pr.latest_reviews]
+        return logins
+
+    def _reviewer_lines(self, pr: PullRequest) -> list[Text]:
+        p = self.palette
+        logins = self.reviewer_logins(pr)
+        if not logins:
+            return []
+        lines = [Text("Reviewers", p.style(p.muted, p.bg, bold=True))]
+        names = {login: display_name(login) for login in logins}
+        width = max(len(name) for name in names.values())
+        for login in logins:
+            state = pr.latest_reviews.get(login)
+            if state is None:
+                verb, color = ("team requested" if "/" in login else "requested"), p.warning_fg
+            else:
+                verb, tone = REVIEW_VERBS.get(state, (state.lower(), "muted"))
+                color = {"success": p.add_fg, "error": p.del_fg, "warning": p.warning_fg}.get(
+                    tone, p.muted
+                )
+            line = Text()
+            line.append(names[login].ljust(width), p.style(p.author_color(login), p.bg, bold=True))
+            line.append(f"  {verb}", p.style(color, p.bg))
+            lines.append(line)
+        return lines
 
     def _comment(self, comment: Comment, width: int, focused: bool, expanded: bool) -> list[Strip]:
         p = self.palette
