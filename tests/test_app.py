@@ -817,3 +817,19 @@ async def test_outdated_thread_on_a_file_no_longer_in_the_diff(app: RevvApp) -> 
         await pilot.press("v")  # not part of the diff: nothing to mark
         await pilot.pause()
         assert not screen.diff.current_section.file.is_viewed  # type: ignore[union-attr]
+
+
+async def test_a_stack_with_one_pull_request_here_is_a_plain_row(backend: DemoBackend) -> None:
+    from revv.ui.inbox import Entry
+
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        requested = next(s for s in inbox.sections if s.key == "requested")
+        requested.items = [i for i in requested.items if i.ref.number != 46]  # only #44 left
+        rows = inbox._arrange(inbox._items()[0])
+        stack_rows = [r for r in rows if r.item.ref.number == 44]
+        assert len(stack_rows) == 1 and isinstance(stack_rows[0], Entry)
+        assert stack_rows[0].stack is None

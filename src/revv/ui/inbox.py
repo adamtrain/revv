@@ -346,6 +346,8 @@ class InboxScreen(Screen):
         for item in ordered:
             if item.stack_id and item.stack_size > 1:
                 stacks.setdefault(item.stack_id, []).append(item)
+        # with only one of its pull requests here, there's nothing to unfold
+        stacks = {stack: members for stack, members in stacks.items() if len(members) > 1}
         rows: list[Entry | StackHeader] = []
         placed: set[str] = set()
         self._stack_focus = {}
@@ -522,6 +524,8 @@ class InboxScreen(Screen):
                     f" · {item.comments} comment{'s' if item.comments != 1 else ''}",
                     p.style(p.muted),
                 )
+        if item.stack_size > 1 and entry.stack is None:
+            detail.append(f"  ▤ stack #{item.stack_number}", p.style(p.accent_fg))
         for label in item.labels[:4]:
             detail.append("  ")
             detail.append_text(self._label(label.name, label.color, p))
