@@ -912,3 +912,75 @@ async def test_refreshing_never_marks_default_hidden_files_viewed(
         assert backend._pr.file("tests/test_retry.py").is_viewed  # type: ignore[union-attr]
         assert not backend._pr.file("uv.lock").is_viewed  # type: ignore[union-attr]
         assert screen.diff.hidden_kinds == {"test", "generated"}
+
+
+# -- jumping into the files tab from elsewhere -------------------------------------------
+
+
+async def test_jumping_to_a_thread_before_the_files_tab_was_ever_shown(app: RevvApp) -> None:
+    from revv.ui.conversation import Card
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        assert screen.tab == "conversation" and not screen.diff.laid_out
+        card = [c for c in screen.query(Card) if c.item.kind == "thread"][-1]
+        card.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        row = screen.diff.current_row
+        assert screen.tab == "files"
+        assert row is not None and row.thread is not None
+        assert row.thread.id == card.item.obj.id
+
+
+async def test_jumping_to_a_thread_after_a_refresh_while_on_the_conversation(
+    app: RevvApp,
+) -> None:
+    from revv.ui.conversation import Card
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)  # the files tab has been laid out once
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("R")  # rebuilds the files while their tab is hidden
+        await pilot.pause(0.3)
+        card = next(c for c in screen.query(Card) if c.item.kind == "thread")
+        card.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        row = screen.diff.current_row
+        assert row is not None and row.thread is not None
+        assert row.thread.id == card.item.obj.id
+        assert row.section in screen.diff.sections  # not a file from before the refresh
+
+
+async def test_going_to_a_file_or_line_from_the_conversation(app: RevvApp) -> None:
+    from revv.diff import LineKind
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        section = screen.diff.sections[3]
+        screen.go_to_section(section)
+        await pilot.pause(0.2)
+        assert screen.diff.current_section is not None
+        assert screen.diff.current_section.path == section.path
+        await pilot.press("2")
+        await pilot.pause()
+        # a line found before a refresh still leads to the same line after it
+        old = next(s for s in screen.diff.sections if s.path == "src/netkit/client.py")
+        line = next(
+            line
+            for hunk in old.hunks
+            for line in hunk.lines
+            if line.kind is LineKind.ADD and line.new_no and line.new_no > 20
+        )
+        await pilot.press("R")
+        await pilot.pause(0.3)
+        screen.go_to_line(old, line)
+        await pilot.pause(0.2)
+        row = screen.diff.current_row
+        assert row is not None and row.section in screen.diff.sections
+        shown = row.right or row.line
+        assert shown is not None and shown.new_no == line.new_no

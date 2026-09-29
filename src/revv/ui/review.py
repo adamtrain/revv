@@ -347,17 +347,7 @@ class ReviewScreen(Screen):
         else:
             diff.load(pr, keep_state=not first)
         if first:
-            # start at the first file that still needs looking at
-            target = next(
-                (s for s in diff.sections if not s.file.is_viewed and not diff.is_hidden(s)), None
-            )
-            if diff.rows:
-                if target is not None and target.index > 0:
-                    diff.jump_to_section(target)
-                else:
-                    diff.set_cursor(0)
-            else:
-                diff.pending_jump = target
+            diff.jump_to_start()  # (if the files tab isn't laid out yet, once it is)
         self.rebuild_tree()
         self.conversation.show(pr)
         self.header.show(pr)
@@ -1274,8 +1264,9 @@ class ReviewScreen(Screen):
         viewed = not section.file.is_viewed
         target = self._pr_file(section)
         task = await self._optimistic(self.session.set_viewed(target, viewed))
-        section.file.viewed = target.viewed
         diff = self.diff
+        section = diff.here(section) or section  # a refresh may have rebuilt the files
+        section.file.viewed = target.viewed
         if viewed:
             section.collapsed = True
             diff.relayout()
@@ -1291,7 +1282,7 @@ class ReviewScreen(Screen):
                     diff.relayout()
                 diff.jump_to_section(nxt)
             else:
-                diff.set_cursor(diff._starts[section.index])
+                diff.set_cursor(diff.start_of(section))
                 self.notify("All files viewed 🎉  Press S to submit your review", timeout=4)
         else:
             section.collapsed = False

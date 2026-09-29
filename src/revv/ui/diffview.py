@@ -7,7 +7,7 @@ under the lines they belong to.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -79,6 +79,13 @@ class Selection:
     @property
     def commentable(self) -> bool:
         return all(not line.expanded for line in self.lines)
+
+
+def _same_line(a: DiffLine | None, b: DiffLine) -> bool:
+    """The same diff line, even when one of them comes from before a refresh."""
+    return a is b or (
+        a is not None and (a.old_no, a.new_no, a.kind) == (b.old_no, b.new_no, b.kind)
+    )
 
 
 class DiffView(ScrollView, can_focus=True):
@@ -160,7 +167,11 @@ class DiffView(ScrollView, can_focus=True):
         self._geo: Geometry | None = None
         self._last_section: FileSection | None = None
         self._nw = 4
-        self.pending_jump: FileSection | None = None  # applied after the first real layout
+        # Jumps asked for before the rows are laid out for the current files (e.g. from the
+        # conversation, before the files tab was ever shown) wait here for the layout.
+        self._deferred: Callable[[], None] | None = None
+        self._laid_out: list[FileSection] | None = None  # the sections the rows were built from
+        self._by_path: dict[str, FileSection] = {}
         self.hidden_kinds: set[str] = set()  # e.g. {"test", "generated"}
         self.since_mode = False  # showing only the changes since your last review
         self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
@@ -258,6 +269,7 @@ class DiffView(ScrollView, can_focus=True):
             section.classify(self.attributes)
             sections.append(section)
         self.sections = sections
+        self._by_path = {section.path: section for section in sections}
         self._code_cache.clear()
         self._thread_cache.clear()
         self.sync_threads()
@@ -364,6 +376,7 @@ class DiffView(ScrollView, can_focus=True):
                 rows.extend(build_rows(section, geo, height))
         self.rows = rows
         self._starts = starts
+        self._laid_out = self.sections
         self.virtual_size = Size(geo.width, len(rows))
         if key is not None:
             self.cursor = self._find_row(key)
@@ -374,16 +387,40 @@ class DiffView(ScrollView, can_focus=True):
             self.cursor = 0
         self.cursor = min(self.cursor, max(0, len(rows) - 1))
         self.refresh()
-        if self.pending_jump is not None and rows:
-            section, self.pending_jump = self.pending_jump, None
-            if section.index > 0:
-                self.jump_to_section(section)
-            else:
-                self.set_cursor(0)
+        if self._deferred is not None:
+            jump, self._deferred = self._deferred, None
+            jump()
+
+    @property
+    def laid_out(self) -> bool:
+        """Whether the rows are those of the files shown: not before the first layout (the
+        files tab hasn't been shown yet), nor while the view is hidden after a reload."""
+        return self._laid_out is self.sections
+
+    def _later(self, jump: Callable[[], None]) -> bool:
+        """Keep a jump until the rows are laid out; True if it has to wait."""
+        if self.laid_out:
+            return False
+        self._deferred = jump  # the latest request wins
+        return True
+
+    def here(self, section: FileSection) -> FileSection | None:
+        """The section showing this file now. The view is rebuilt on every refresh (and when
+        the files are regrouped), so a section handed out earlier may be an old one."""
+        if section.index < len(self.sections) and self.sections[section.index] is section:
+            return section
+        return self._by_path.get(section.path)
+
+    def start_of(self, section: FileSection) -> int:
+        """The first row of a file (0 if it can't be found)."""
+        current = self.here(section)
+        if current is None or not self.laid_out or current.index >= len(self._starts):
+            return 0
+        return self._starts[current.index]
 
     @staticmethod
     def _row_key(row: Row) -> tuple:
-        section = row.section.index
+        section = row.section.path  # by path: the files may have been reordered since
         if row.kind is RowKind.THREAD and row.thread is not None:
             return (section, "thread", row.thread.id, row.tline)
         if row.kind is RowKind.GAP:
@@ -396,9 +433,10 @@ class DiffView(ScrollView, can_focus=True):
         return (section, row.kind.name)
 
     def _find_row(self, key: tuple) -> int:
-        section_index = key[0]
-        if section_index >= len(self._starts):
+        section = self._by_path.get(key[0])
+        if section is None or section.index >= len(self._starts):
             return 0
+        section_index = section.index
         start = self._starts[section_index]
         end = (
             self._starts[section_index + 1]
@@ -673,14 +711,14 @@ class DiffView(ScrollView, can_focus=True):
             return
         section = self.current_section
         if section is None or section not in visible:
-            self.set_cursor(self._starts[visible[0].index], top=True)
+            self.set_cursor(self.start_of(visible[0]), top=True)
             return
         position = visible.index(section)
-        if direction < 0 and self.cursor > self._starts[section.index]:
+        if direction < 0 and self.cursor > self.start_of(section):
             target = section  # first go back to the top of the current file
         else:
             target = visible[max(0, min(len(visible) - 1, position + direction))]
-        self.set_cursor(self._starts[target.index], top=True)
+        self.set_cursor(self.start_of(target), top=True)
 
     def _reveal(self, section: FileSection) -> None:
         if self.is_hidden(section):
@@ -697,6 +735,12 @@ class DiffView(ScrollView, can_focus=True):
 
     def jump_to_line(self, section: FileSection, line: DiffLine) -> None:
         """Show a diff line (unfolding or revealing its file if needed) and put the cursor on it."""
+        if self._later(lambda: self.jump_to_line(section, line)):
+            return
+        current = self.here(section)
+        if current is None:
+            return
+        section = current
         changed = False
         if section.collapsed:
             section.collapsed = False
@@ -706,23 +750,39 @@ class DiffView(ScrollView, can_focus=True):
             changed = True
         if changed:
             self.relayout()
-        start = self._starts[section.index]
-        for index in range(start, len(self.rows)):
+        for index in range(self.start_of(section), len(self.rows)):
             row = self.rows[index]
             if row.section is not section:
                 break
-            if row.wrap == 0 and (row.line is line or row.right is line):
+            if row.wrap == 0 and (_same_line(row.line, line) or _same_line(row.right, line)):
                 if self.split:
-                    self.cursor_side = Side.LEFT if row.right is not line else Side.RIGHT
+                    self.cursor_side = Side.RIGHT if _same_line(row.right, line) else Side.LEFT
                 self.set_cursor(index, center=True)
                 return
         self.jump_to_section(section)
 
     def jump_to_section(self, section: FileSection) -> None:
-        if self.is_hidden(section):
-            self._reveal(section)
+        if self._later(lambda: self.jump_to_section(section)):
+            return
+        current = self.here(section)
+        if current is None:
+            return
+        if self.is_hidden(current):
+            self._reveal(current)
             self.relayout()
-        self.set_cursor(self._starts[section.index], top=True)
+        self.set_cursor(self.start_of(current), top=True)
+
+    def jump_to_start(self) -> None:
+        """Put the cursor on the first file that still needs looking at."""
+        if self._later(self.jump_to_start):
+            return
+        target = next(
+            (s for s in self.sections if not s.file.is_viewed and not self.is_hidden(s)), None
+        )
+        if target is not None and target.index > 0:
+            self.jump_to_section(target)
+        else:
+            self.set_cursor(0)
 
     def _is_change_row(self, index: int) -> bool:
         row = self.rows[index]
@@ -810,11 +870,18 @@ class DiffView(ScrollView, can_focus=True):
 
     def thread_row(self, thread: ReviewThread) -> int | None:
         for index, row in enumerate(self.rows):
-            if row.kind is RowKind.THREAD and row.thread is thread and row.tline == 0:
+            if (
+                row.kind is RowKind.THREAD
+                and row.thread is not None
+                and row.thread.id == thread.id  # (a refresh brings new thread objects)
+                and row.tline == 0
+            ):
                 return index
         return None
 
     def jump_to_thread(self, thread: ReviewThread) -> None:
+        if self._later(lambda: self.jump_to_thread(thread)):
+            return
         for section in self.sections:
             if section.path != thread.path:
                 continue
@@ -883,10 +950,11 @@ class DiffView(ScrollView, can_focus=True):
             self.set_cursor(index)
 
     def toggle_section(self, section: FileSection, collapsed: bool | None = None) -> None:
+        section = self.here(section) or section
         section.collapsed = (not section.collapsed) if collapsed is None else collapsed
         self.relayout()
-        if section.collapsed:
-            self.set_cursor(self._starts[section.index])
+        if section.collapsed and self.laid_out:
+            self.set_cursor(self.start_of(section))
 
     def expand_gap(self, section: FileSection, gap: int) -> None:
         section.expanded_gaps.add(gap)

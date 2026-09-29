@@ -381,3 +381,37 @@ async def test_settings_offer_the_team_reset_only_there(tmp_path, monkeypatch) -
         screen.query_one("#forget-teams").press()
         await pilot.pause(0.3)
         assert cache.cached_teams() == ["acme/python-reviewers"]  # checked again with GitHub
+
+
+async def test_the_maintainers_card_leads_to_the_first_file_to_look_at(demo_is_obsidian) -> None:
+    """Your teams arrive after the pull request is shown, regrouping the files; the files
+    tab must then open on the first file to look at in the new order."""
+    from revv.ui.conversation import Card
+    from revv.ui.review import ReviewScreen
+
+    app = RevvApp(DemoBackend(latency=0.02), target=DEMO_REF, repo=DEMO_REF.repo)
+    async with app.run_test(size=(150, 45)) as pilot:
+        await pilot.pause(0.6)
+        screen = app.screen
+        assert isinstance(screen, ReviewScreen) and screen.tab == "conversation"
+        assert screen.ownership is not None and screen.ownership.my_teams
+        diff = screen.diff
+        # move around the conversation, over the maintainers card and back
+        await pilot.press("j", "j", "j", "k", "k", "k")
+        card = next(c for c in screen.query(Card) if c.item.kind == "maintainers")
+        card.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert screen.tab == "files"
+        first = next(s for s in diff.sections if not s.file.is_viewed and not diff.is_hidden(s))
+        assert diff.current_section is first
+        assert screen.ownership.mine(first.path)  # your team's files come first
+        # regrouping keeps the cursor on the same file
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        await pilot.pause()
+        here = diff.current_section
+        assert here is not None
+        await pilot.press("m")
+        await pilot.pause(0.2)
+        assert diff.current_section is not None and diff.current_section.path == here.path
