@@ -12,7 +12,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, RadioButton, RadioSet, Static, TextArea
+from textual.widgets import Button, Input, RadioButton, RadioSet, Static, TextArea
 
 from revv.models import PullRequest, ReviewEvent
 
@@ -248,6 +248,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("o", "open in the browser"),
             ("y", "copy file path and line"),
             ("R", "refresh from GitHub"),
+            ("@", "nicknames for people"),
             ("ctrl+p", "command palette (themes and more)"),
             ("q", "back to inbox / quit"),
         ],
@@ -305,4 +306,84 @@ class HelpScreen(ModalScreen[None]):
         return grid
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class NicknameDialog(ModalScreen[dict[str, str] | None]):
+    """Give people a name you'd rather see than their GitHub login."""
+
+    DEFAULT_CSS = """
+    NicknameDialog { align: center middle; background: $background 55%; }
+    NicknameDialog > Vertical {
+        width: 72; max-width: 95%; height: auto; max-height: 90%;
+        background: $surface; border: round $primary; padding: 0 1;
+        border-title-style: bold;
+    }
+    NicknameDialog #intro { color: $text-muted; margin: 1 0; height: auto; }
+    NicknameDialog VerticalScroll { height: auto; max-height: 24; }
+    NicknameDialog .person { height: 3; }
+    NicknameDialog .person Static { width: 24; padding: 1 1 0 0; text-align: right; }
+    NicknameDialog .person Input { width: 1fr; }
+    NicknameDialog #hints { color: $text-muted; height: auto; margin: 1 0; }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("ctrl+s", "save", "Save", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+        Binding("down", "app.focus_next", "Next", show=False),
+        Binding("up", "app.focus_previous", "Previous", show=False),
+    ]
+
+    def __init__(self, logins: list[str], nicknames: dict[str, str]) -> None:
+        super().__init__()
+        known = {login.lower(): login for login in logins}
+        for login in nicknames:
+            known.setdefault(login.lower(), login)
+        self.logins = sorted(known.values(), key=str.lower)
+        self.nicknames = {login.lower(): name for login, name in nicknames.items()}
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as box:
+            box.border_title = "Nicknames"
+            yield Static(
+                "Shown instead of GitHub logins, only to you. Leave a field empty to "
+                "use the login.",
+                id="intro",
+            )
+            with VerticalScroll():
+                for login in self.logins:
+                    with Horizontal(classes="person"):
+                        yield Static(login)
+                        yield Input(
+                            self.nicknames.get(login.lower(), ""),
+                            placeholder=login,
+                            name=login,
+                            select_on_focus=False,
+                        )
+            yield Static(
+                Text.assemble(
+                    (" ctrl+s ", "bold reverse"),
+                    " save   ",
+                    (" ↑ ↓ ", "bold reverse"),
+                    " move   ",
+                    (" esc ", "bold reverse"),
+                    " cancel",
+                ),
+                id="hints",
+            )
+
+    def on_mount(self) -> None:
+        inputs = list(self.query(Input))
+        if inputs:
+            inputs[0].focus()
+
+    @on(Input.Submitted)
+    def submitted(self) -> None:
+        self.action_save()
+
+    def action_save(self) -> None:
+        names = {str(field.name): field.value.strip() for field in self.query(Input)}
+        self.dismiss({login: name for login, name in names.items() if name})
+
+    def action_cancel(self) -> None:
         self.dismiss(None)

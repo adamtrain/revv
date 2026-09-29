@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
+from datetime import UTC, datetime
 from functools import partial
 from typing import ClassVar
 
@@ -17,16 +19,32 @@ from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv.classify import GitAttributes
+from revv.config import display_name, set_nicknames, setting
 from revv.diff import LineKind
-from revv.models import Comment, PullRequest, Review, ReviewEvent, ReviewThread, Side
+from revv.models import (
+    Comment,
+    Fingerprint,
+    PullRequest,
+    Review,
+    ReviewEvent,
+    ReviewThread,
+    Side,
+)
 from revv.session import ReviewSession
 from revv.ui.conversation import ConversationView, Item
-from revv.ui.dialogs import ConfirmDialog, HelpScreen, SubmitResult, SubmitReviewDialog
+from revv.ui.dialogs import (
+    ConfirmDialog,
+    HelpScreen,
+    NicknameDialog,
+    SubmitResult,
+    SubmitReviewDialog,
+)
 from revv.ui.diffmodel import FileSection, RowKind
 from revv.ui.diffview import DiffView, Selection
 from revv.ui.editor import DRAFTS, CommentEditor, EditorResult
 from revv.ui.filetree import FileTree, tree_order
 from revv.ui.palette import Palette
+from revv.ui.render import relative_time
 from revv.ui.widgets import PRHeader, StatusBar
 
 PREFETCH_LIMIT = 150  # fetch full file text up front for PRs with at most this many files
@@ -88,6 +106,12 @@ class ReviewScreen(Screen):
     ReviewScreen #sidebar { width: 34; max-width: 40%; border-right: vkey $panel; }
     ReviewScreen #sidebar:focus-within { border-right: vkey $accent; }
     ReviewScreen FileTree { height: 1fr; }
+    ReviewScreen #banner {
+        height: auto; padding: 0 1; display: none; text-style: bold;
+    }
+    ReviewScreen #banner.cached { background: $warning 30%; color: $text; }
+    ReviewScreen #banner.offline { background: $error 35%; color: $text; }
+    ReviewScreen #banner.changed { background: $accent 35%; color: $text; }
     ReviewScreen #hidden-note {
         height: auto; background: $surface; color: $text-muted; padding: 0 1;
         border-top: solid $panel; display: none;
@@ -115,6 +139,7 @@ class ReviewScreen(Screen):
         Binding("R", "refresh", "Refresh", show=False),
         Binding("o", "open_browser", "Open in browser", show=False),
         Binding("y", "copy_location", "Copy location", show=False),
+        Binding("at", "nicknames", "Nicknames", show=False),
         Binding("T", "hide_kind('test')", "Hide tests", show=False),
         Binding("X", "hide_kind('generated')", "Hide generated", show=False),
     ]
@@ -126,11 +151,14 @@ class ReviewScreen(Screen):
         self._busy = 0
         self._syncing = False
         self._save_timer = None
+        self._last_write = 0.0
+        self._checking = False
 
     # -- composition ---------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         yield PRHeader(id="header")
+        yield Static(id="banner")
         with ContentSwitcher(initial="files", id="tabs"):
             with Horizontal(id="files"):
                 with Vertical(id="sidebar"):
@@ -165,6 +193,8 @@ class ReviewScreen(Screen):
         return self.query_one(ContentSwitcher).current or "files"
 
     def on_mount(self) -> None:
+        kinds = setting("hide_by_default")
+        self.diff.hidden_kinds = {k for k in kinds if k in ("test", "generated")}
         self.header.show(None, f"Loading {self.session.ref}…")
         self.query_one("#files").loading = True
         self.diff.focus()
@@ -182,10 +212,14 @@ class ReviewScreen(Screen):
             )
             return
         self._present(pr, first=True)
-        if not self.session.fresh:  # opened from the disk cache: sync in the background
+        if not self.session.fresh:  # opened from the disk cache: sync right away
+            self.show_banner("cached")
             self.refresh_pr(quiet=True)
         self.prefetch()
         self.load_attributes()
+        interval = setting("refresh_interval")
+        if isinstance(interval, int | float) and interval > 0:
+            self.set_interval(max(10, interval), self.check_for_changes)
 
     def _present(self, pr: PullRequest, *, first: bool = False) -> None:
         order = {path: i for i, path in enumerate(tree_order([f.path for f in pr.files]))}
@@ -195,7 +229,9 @@ class ReviewScreen(Screen):
         diff.load(pr, keep_state=not first)
         if first:
             # start at the first file that still needs looking at
-            target = next((s for s in diff.sections if not s.file.is_viewed), None)
+            target = next(
+                (s for s in diff.sections if not s.file.is_viewed and not diff.is_hidden(s)), None
+            )
             if diff.rows:
                 if target is not None and target.index > 0:
                     diff.jump_to_section(target)
@@ -213,6 +249,8 @@ class ReviewScreen(Screen):
     def rebuild_tree(self) -> None:
         diff = self.diff
         self.file_tree.build(diff.visible_sections)
+        self.header.hidden = {s.path for s in diff.sections if diff.is_hidden(s)}
+        self.header.refresh()
         note = self.query_one("#hidden-note", Static)
         counts = diff.hidden_counts()
         if not counts:
@@ -320,6 +358,10 @@ class ReviewScreen(Screen):
     def cursor_file_changed(self, message: DiffView.CursorFileChanged) -> None:
         if not self.file_tree.has_focus:
             self.file_tree.reveal(message.section)
+
+    @on(DiffView.SectionsChanged)
+    def sections_changed(self) -> None:
+        self.rebuild_tree()
 
     @on(DiffView.CursorMoved)
     def cursor_moved(self) -> None:
@@ -477,6 +519,39 @@ class ReviewScreen(Screen):
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen())
 
+    def _people(self) -> list[str]:
+        if not self.session.loaded:
+            return []
+        pr = self.pr
+        people = {pr.author, *pr.review_requests, *pr.latest_reviews}
+        people |= {c.author for c in pr.comments}
+        people |= {r.author for r in pr.reviews}
+        people |= {c.author for t in pr.threads for c in t.comments}
+        return sorted(login for login in people if login and "/" not in login)
+
+    def action_nicknames(self) -> None:
+        self.edit_nicknames()
+
+    @work(group="nicknames")
+    async def edit_nicknames(self) -> None:
+        result = await self.app.push_screen_wait(
+            NicknameDialog(self._people(), setting("nicknames"))
+        )
+        if result is None:
+            return
+        set_nicknames(result)
+        self.refresh_names()
+        self.notify("Nicknames saved", timeout=1.5)
+
+    def refresh_names(self) -> None:
+        """Re-render everything that shows people's names."""
+        diff = self.diff
+        diff._thread_cache.clear()
+        diff.refresh()
+        self.conversation.refresh_cards()
+        self.header.refresh()
+        self.update_status()
+
     def action_back(self) -> None:
         if self.from_inbox:
             self.app.pop_screen()
@@ -570,6 +645,7 @@ class ReviewScreen(Screen):
     async def _run(self, label: str, coroutine) -> bool:
         """Await an API call, reporting failure as a notification."""
         self._busy += 1
+        self._last_write = time.monotonic()
         try:
             await coroutine
             return True
@@ -716,7 +792,9 @@ class ReviewScreen(Screen):
             last = thread.comments[-1]
             context = Text()
             context.append(f"{thread.path} {thread.line_label}\n", p.style(p.faint))
-            context.append(last.author, p.style(p.author_color(last.author), bold=True))
+            context.append(
+                display_name(last.author), p.style(p.author_color(last.author), bold=True)
+            )
             context.append(": ")
             excerpt = " ".join(last.body.split())
             context.append(
@@ -725,7 +803,7 @@ class ReviewScreen(Screen):
         pending = self.pr.pending_review is not None
         result: EditorResult | None = await self.app.push_screen_wait(
             CommentEditor(
-                f"Reply to {root.author if root else 'thread'}",
+                f"Reply to {display_name(root.author) if root else 'thread'}",
                 mode="reply",
                 context=context,
                 draft_key=f"reply:{thread.id}",
@@ -891,7 +969,11 @@ class ReviewScreen(Screen):
         if viewed:
             section.collapsed = True
             diff.relayout()
-            following = diff.sections[section.index + 1 :] + diff.sections[: section.index]
+            following = [
+                s
+                for s in diff.sections[section.index + 1 :] + diff.sections[: section.index]
+                if not diff.is_hidden(s)
+            ]
             nxt = next((s for s in following if not s.file.is_viewed), None)
             if nxt is not None:
                 if nxt.collapsed:
@@ -914,24 +996,30 @@ class ReviewScreen(Screen):
         self.update_status()
 
     def action_hide_kind(self, kind: str) -> None:
-        """Mark every test (or generated) file as viewed and hide it; again to show them."""
-        if not self._ready(write=True):
+        """Show test (or generated) files; or hide them again, marking them as viewed."""
+        if not self._ready():
             return
         diff = self.diff
         label, key = ("test", "T") if kind == "test" else ("generated", "X")
-        if kind in diff.hidden_kinds:
-            diff.hidden_kinds.discard(kind)
-            for section in diff.sections:
-                if kind in section.kinds:
-                    section.force_visible = False
-            diff.relayout()
-            self.rebuild_tree()
-            self.update_status()
-            self.notify(f"Showing {label} files again", timeout=2)
-            return
         matching = [s for s in diff.sections if kind in s.kinds]
         if not matching:
             self.notify(f"No {label} files in this pull request", timeout=2)
+            return
+        if kind in diff.hidden_kinds:
+            diff.hidden_kinds.discard(kind)
+            for section in matching:
+                section.force_visible = False
+            diff.relayout()
+            self.rebuild_tree()
+            self.update_status()
+            count = len(matching)
+            self.notify(
+                f"Showing {count} {label} file{'s' if count != 1 else ''} "
+                f"({key} hides them again and marks them as viewed)",
+                timeout=3,
+            )
+            return
+        if not self._ready(write=True):
             return
         diff.hidden_kinds.add(kind)
         for section in matching:
@@ -1029,6 +1117,8 @@ class ReviewScreen(Screen):
         try:
             pr = await self.session.refresh()
         except Exception as error:
+            if not self.session.fresh:
+                self.show_banner("offline")
             self.notify(str(error), title="Couldn't refresh", severity="error")
             return
         finally:
@@ -1036,9 +1126,53 @@ class ReviewScreen(Screen):
             self.header.syncing = False
             self.header.refresh()
         self._present(pr)
+        self.show_banner(None)
         self.prefetch()
         if not quiet:
             self.notify("Up to date", timeout=1.5)
+
+    # -- noticing changes on GitHub -------------------------------------------------
+
+    def show_banner(self, kind: str | None, detail: str = "") -> None:
+        banner = self.query_one("#banner", Static)
+        banner.set_classes(kind or "")
+        if kind is None:
+            banner.display = False
+            return
+        age = ""
+        if self.session.cached_at:
+            age = f" from {relative_time(datetime.fromtimestamp(self.session.cached_at, UTC))}"
+        text = {
+            "cached": f"◷ Showing the cached copy{age} · syncing with GitHub…",
+            "offline": f"⚠ Couldn't reach GitHub · showing the cached copy{age} · R to retry",
+            "changed": f"↻ Updated on GitHub: {detail} · press R to refresh",
+        }[kind]
+        banner.update(text)
+        banner.display = True
+
+    def on_click(self, event) -> None:
+        widget = getattr(event, "widget", None)
+        if widget is not None and widget.id == "banner" and self.session.loaded:
+            self.action_refresh()
+
+    @work(exclusive=True, group="check")
+    async def check_for_changes(self) -> None:
+        """Every so often, cheaply check whether the PR changed on GitHub."""
+        session = self.session
+        if not session.loaded or not session.fresh or self._syncing or self._busy:
+            return
+        if time.monotonic() - self._last_write < 10:
+            return  # our own changes may still be settling on GitHub
+        local = Fingerprint.of(session.pr)
+        try:
+            remote = await session.fingerprint()
+        except Exception:
+            return  # offline for a moment; try again next time
+        if session.pr is None or self._syncing:
+            return
+        changes = remote.changes_since(local)
+        if changes:
+            self.show_banner("changed", ", ".join(changes))
 
     # -- misc ------------------------------------------------------------------------
 

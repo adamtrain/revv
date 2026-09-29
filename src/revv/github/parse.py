@@ -283,9 +283,14 @@ def parse_search_results(data: Json, host: str) -> list[PRSummary]:
                 is_draft=bool(node.get("isDraft")),
                 my_review_state=my_state,
                 head_ref=node.get("headRefName") or "",
+                base_ref=node.get("baseRefName") or "",
                 labels=[
                     Label(n["name"], n.get("color", "888888")) for n in _nodes(node.get("labels"))
                 ],
+                stack_id=(node.get("stack") or {}).get("id"),
+                stack_number=(node.get("stack") or {}).get("number"),
+                stack_size=(node.get("stack") or {}).get("size") or 0,
+                stack_position=(node.get("stackEntry") or {}).get("position") or 0,
             )
         )
     return results
@@ -315,6 +320,7 @@ def apply_details(data: Json, items: list[PRSummary]) -> None:
             item.review_decision = node.get("reviewDecision")
             item.additions = node.get("additions") or 0
             item.deletions = node.get("deletions") or 0
+            item.changed_files = node.get("changedFiles") or 0
             item.comments = (node.get("comments") or {}).get("totalCount", 0)
             item.requested_directly = viewer in users
             item.requested_teams = teams

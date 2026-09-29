@@ -6,6 +6,7 @@ from typing import Protocol
 
 from revv.models import (
     Comment,
+    Fingerprint,
     PRRef,
     PRSummary,
     PullRequest,
@@ -29,6 +30,10 @@ class Backend(Protocol):
         self, pr: PullRequest, requests: list[tuple[str, str]]
     ) -> dict[tuple[str, str], str | None]:
         """Fetch file text for (oid, path) pairs; None for binary/missing/huge files."""
+        ...
+
+    async def fingerprint(self, ref: PRRef) -> Fingerprint:
+        """A cheap summary of the pull request, polled to notice changes."""
         ...
 
     async def search_pull_requests(self, query: str) -> list[PRSummary]:

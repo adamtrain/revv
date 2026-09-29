@@ -5,8 +5,10 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 
 - **A review inbox.** Run `revv` inside a repository to see every open pull request where
   your review was requested (directly or through one of your teams) or that is assigned to
-  you. Tabs also list the ones you've reviewed and your own. Anything else is one PR number
-  or URL away: just type it.
+  you. Tabs also list the ones you've reviewed and your own. Stacked pull requests are
+  grouped in stack order, the oldest come first (`s` flips that), and `i` ignores a pull
+  request (it moves to an "Ignored" tab). Anything else is one PR number or URL away:
+  just type it.
 - **A pleasant diff.** Every changed file in one scrollable view, syntax-highlighted, with
   word-level highlighting of what changed on a line. Switch between unified and
   side-by-side, expand hidden context, fold files, and jump by change, file or thread. The
@@ -20,12 +22,14 @@ A fast, keyboard-driven terminal UI for reviewing GitHub pull requests, built wi
 - **Reviews the GitHub way.** Comments go into a pending review, just like "Start a review"
   on github.com, so nothing is lost if you quit. Submit with Comment, Approve or Request
   changes. When no review is pending you can also post a single comment right away.
-- **Instant.** Pull requests and the inbox open straight from an on-disk cache and sync
-  with GitHub in the background. File contents are cached by commit, so they never need
-  fetching twice.
+- **Instant, and never stale for long.** Pull requests and the inbox open straight from
+  an on-disk cache (clearly marked as such) and sync with GitHub right away. While you
+  review, revv checks every 30 seconds whether the pull request changed and offers to
+  refresh (`R`). File contents are cached by commit, so they're never fetched twice.
 - **Viewed files.** Mark files as viewed (synced with GitHub's checkbox) and move on to the
-  next unviewed one. One key marks **all test files** (or **all generated files**) as
-  viewed and hides them.
+  next unviewed one; the header shows how far along you are, weighted by changed lines.
+  Test files and generated files are hidden by default (`T` / `X` show them).
+- **Nicknames.** Press `@` to give people the names you'd rather see than their logins.
 
 ## Install
 
@@ -66,13 +70,15 @@ Press `?` in the app for the full list. The ones you'll use constantly:
 | `s` | suggest a change |
 | `r` · `x` · `e` · `d` | reply · resolve/unresolve · edit · delete |
 | `v` | mark the file as viewed and go to the next unviewed one |
-| `T` · `X` | mark all test files · all generated files as viewed and hide them (again: show) |
+| `T` · `X` | show test files · generated files (they start hidden); again: hide them and mark them viewed |
 | `\|` | unified / side-by-side |
 | `/` | go to file |
 | `S` · `A` | submit review · approve |
 | `C` | comment on the pull request |
 | `1` · `2` | files · conversation |
 | `o` · `y` | open in browser · copy `path:line` |
+| `R` | refresh (applies changes revv noticed on GitHub) |
+| `@` | nicknames |
 | `q` | back to the inbox (or quit) |
 
 In the comment editor, `ctrl+s` adds the comment to your review (or saves), `ctrl+g` posts
@@ -81,6 +87,17 @@ opens your `$EDITOR`, and `esc` cancels, keeping your draft for next time.
 
 The command palette (`ctrl+p`) has all actions and lets you switch themes. The diff
 colours follow the theme, and your choice is remembered.
+
+Settings live in `~/.config/revv/config.json` and are all optional:
+
+```json
+{
+  "hide_by_default": ["test", "generated"],
+  "nicknames": {"octocat": "Octo"},
+  "inbox_sort": "asc",
+  "refresh_interval": 30
+}
+```
 
 ### What counts as a test or generated file
 

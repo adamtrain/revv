@@ -24,6 +24,7 @@ from revv.github.parse import (
 from revv.models import (
     ChangedFile,
     Comment,
+    Fingerprint,
     PRRef,
     PRSummary,
     PullRequest,
@@ -163,6 +164,36 @@ class GitHubBackend:
         for part in await asyncio.gather(*(self._blob_batch(pr, b) for b in batches)):
             results.update(part)
         return results
+
+    async def fingerprint(self, ref: PRRef) -> Fingerprint:
+        data = await self.client.graphql(
+            q.FINGERPRINT, owner=ref.repo.owner, name=ref.repo.name, number=ref.number
+        )
+        node = (data.get("repository") or {}).get("pullRequest") or {}
+        state = node.get("state") or "OPEN"
+        return Fingerprint(
+            head=node.get("headRefOid") or "",
+            state="DRAFT" if node.get("isDraft") and state == "OPEN" else state,
+            comments=(node.get("comments") or {}).get("totalCount", 0),
+            reviews=tuple(
+                sorted(
+                    (r["id"], r.get("state") or "")
+                    for r in (node.get("reviews") or {}).get("nodes") or []
+                    if r
+                )
+            ),
+            threads=tuple(
+                sorted(
+                    (
+                        t["id"],
+                        bool(t.get("isResolved")),
+                        (t.get("comments") or {}).get("totalCount", 0),
+                    )
+                    for t in (node.get("reviewThreads") or {}).get("nodes") or []
+                    if t
+                )
+            ),
+        )
 
     async def search_pull_requests(self, query: str) -> list[PRSummary]:
         data = await self.client.graphql(q.SEARCH_PULL_REQUESTS, query=query)

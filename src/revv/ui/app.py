@@ -71,6 +71,10 @@ class RevvApp(App[str | None]):
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         yield from super().get_system_commands(screen)
+        if isinstance(screen, InboxScreen):
+            yield SystemCommand(
+                "Nicknames…", "Choose the names you see for people (@)", screen.action_nicknames
+            )
         if isinstance(screen, ReviewScreen):
             commands = [
                 ("Submit review…", "Approve, request changes or comment", "submit"),
@@ -89,6 +93,7 @@ class RevvApp(App[str | None]):
                 ("Open in browser", "Open the current location on GitHub", "open_browser"),
                 ("Show files", "Files tab", "switch_tab('files')"),
                 ("Show conversation", "Conversation tab", "switch_tab('conversation')"),
+                ("Nicknames…", "Choose the names you see for people (@)", "nicknames"),
                 ("Keyboard shortcuts", "All the keys", "help"),
             ]
             for title, help_text, action in commands:

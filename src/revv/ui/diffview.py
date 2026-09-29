@@ -132,6 +132,9 @@ class DiffView(ScrollView, can_focus=True):
     class CursorMoved(Message):
         pass
 
+    class SectionsChanged(Message):
+        """A hidden file was revealed (e.g. by jumping to it)."""
+
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self.pr: PullRequest | None = None
@@ -552,7 +555,7 @@ class DiffView(ScrollView, can_focus=True):
         scroll_y = round(self.scroll_offset.y)
         margin = min(SCROLL_OFF, max(0, (height - 2) // 3))
         if top:
-            target = max(0, first - margin - 1)
+            target = first  # e.g. a file header: put it right at the top
         elif center:
             target = max(0, first - height // 2)
         elif first < scroll_y + margin + 1:
@@ -635,9 +638,14 @@ class DiffView(ScrollView, can_focus=True):
             target = visible[max(0, min(len(visible) - 1, position + direction))]
         self.set_cursor(self._starts[target.index], top=True)
 
-    def jump_to_section(self, section: FileSection) -> None:
+    def _reveal(self, section: FileSection) -> None:
         if self.is_hidden(section):
             section.force_visible = True
+            self.post_message(self.SectionsChanged())
+
+    def jump_to_section(self, section: FileSection) -> None:
+        if self.is_hidden(section):
+            self._reveal(section)
             self.relayout()
         self.set_cursor(self._starts[section.index], top=True)
 
@@ -694,8 +702,11 @@ class DiffView(ScrollView, can_focus=True):
 
     def jump_to_thread(self, thread: ReviewThread) -> None:
         for section in self.sections:
-            if section.path == thread.path and section.collapsed:
+            if section.path != thread.path:
+                continue
+            if section.collapsed or self.is_hidden(section):
                 section.collapsed = False
+                self._reveal(section)
                 self.relayout()
         index = self.thread_row(thread)
         if index is None:

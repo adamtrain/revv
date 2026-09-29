@@ -310,6 +310,65 @@ class PullRequest:
         return sum(1 for t in self.threads if not t.is_resolved and not t.is_pending)
 
 
+@dataclass(frozen=True)
+class Fingerprint:
+    """What a pull request looks like at a glance, to notice changes on GitHub."""
+
+    head: str
+    state: str
+    comments: int
+    reviews: tuple[tuple[str, str], ...]  # (id, state)
+    threads: tuple[tuple[str, bool, int], ...]  # (id, resolved, comment count)
+
+    @classmethod
+    def of(cls, pr: PullRequest) -> Fingerprint:
+        return cls(
+            head=pr.head_oid,
+            state="DRAFT" if pr.is_draft and pr.state == "OPEN" else pr.state,
+            comments=len(pr.comments),
+            reviews=tuple(sorted((r.id, r.state) for r in pr.reviews)),
+            threads=tuple(sorted((t.id, t.is_resolved, len(t.comments)) for t in pr.threads)),
+        )
+
+    def changes_since(self, old: Fingerprint) -> list[str]:
+        """A short, human description of what changed from `old` to this."""
+        changes: list[str] = []
+        if self.head != old.head:
+            changes.append("new commits")
+        if self.state != old.state:
+            changes.append(
+                {"MERGED": "merged", "CLOSED": "closed", "DRAFT": "now a draft"}.get(
+                    self.state, "reopened"
+                )
+            )
+        old_threads = {t[0]: t for t in old.threads}
+        new_threads = [t for t in self.threads if t[0] not in old_threads]
+        replies = sum(
+            max(0, count - old_threads[tid][2])
+            for tid, _, count in self.threads
+            if tid in old_threads
+        )
+        resolved = sum(
+            1 for tid, done, _ in self.threads if tid in old_threads and done != old_threads[tid][1]
+        )
+        comments = max(0, self.comments - old.comments) + replies
+        if new_threads:
+            changes.append(f"{len(new_threads)} new thread{'s' if len(new_threads) != 1 else ''}")
+        if comments:
+            changes.append(f"{comments} new comment{'s' if comments != 1 else ''}")
+        if resolved:
+            changes.append(f"{resolved} thread{'s' if resolved != 1 else ''} (un)resolved")
+        old_reviews = dict(old.reviews)
+        submitted = [
+            rid
+            for rid, state in self.reviews
+            if state != "PENDING" and old_reviews.get(rid) != state
+        ]
+        if submitted:
+            changes.append(f"{len(submitted)} new review{'s' if len(submitted) != 1 else ''}")
+        return changes
+
+
 @dataclass(slots=True)
 class PRSummary:
     """A row in the review inbox."""
@@ -330,9 +389,21 @@ class PRSummary:
     additions: int = 0
     deletions: int = 0
     comments: int = 0
+    changed_files: int = 0
     head_ref: str = ""
+    base_ref: str = ""
     checks_state: str | None = None
     labels: list[Label] = field(default_factory=list)
+    # GitHub's native stacked pull requests
+    stack_id: str | None = None
+    stack_number: int | None = None
+    stack_size: int = 0
+    stack_position: int = 0  # 1 is the pull request closest to the base branch
+
+    @property
+    def key(self) -> str:
+        """A stable identifier, e.g. for remembering ignored pull requests."""
+        return f"{self.ref.repo.host}/{self.ref.repo.full_name}#{self.ref.number}"
 
     @property
     def review_requested(self) -> bool:

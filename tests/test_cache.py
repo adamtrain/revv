@@ -105,6 +105,8 @@ async def test_cached_review_screen_syncs_and_allows_writes(tmp_path: Path) -> N
         screen = app.screen
         assert isinstance(screen, ReviewScreen)
         assert screen.pr.title == "Stale title from the cache"
+        banner = screen.query_one("#banner")
+        assert banner.display and "cached" in str(banner.render())
         for _ in range(100):
             if screen.session.fresh:
                 break
@@ -112,6 +114,7 @@ async def test_cached_review_screen_syncs_and_allows_writes(tmp_path: Path) -> N
         await pilot.pause(0.05)
         assert screen.session.fresh
         assert screen.pr.title.startswith("Retry failed requests")
+        assert not banner.display
 
 
 async def test_inbox_shows_cached_rows_first(tmp_path: Path) -> None:
@@ -132,4 +135,4 @@ async def test_inbox_shows_cached_rows_first(tmp_path: Path) -> None:
             if len(requested.items) == 3:
                 break
             await pilot.pause(0.02)
-        assert len(requested.items) == 3
+        assert len(requested.items) == 5

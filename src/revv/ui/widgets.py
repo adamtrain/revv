@@ -6,6 +6,7 @@ from rich.text import Text
 from textual.reactive import reactive
 from textual.widget import Widget
 
+from revv.config import display_name
 from revv.models import PullRequest
 from revv.ui.palette import Palette
 from revv.ui.render import relative_time
@@ -59,6 +60,7 @@ class PRHeader(Widget):
         self.pr: PullRequest | None = None
         self.message = "Loading…"
         self.syncing = False
+        self.hidden: set[str] = set()  # paths of hidden (test/generated) files
 
     def show(self, pr: PullRequest | None, message: str = "") -> None:
         self.pr = pr
@@ -95,7 +97,7 @@ class PRHeader(Widget):
         bottom = Text()
         bottom.append_text(state_badge(pr, p))
         bottom.append(" ")
-        bottom.append(pr.author, p.style(p.author_color(pr.author), bold=True))
+        bottom.append(display_name(pr.author), p.style(p.author_color(pr.author), bold=True))
         bottom.append("  ")
         bottom.append(pr.head_ref, p.style(p.primary_fg))
         bottom.append(" → ", p.style(p.faint))
@@ -115,9 +117,7 @@ class PRHeader(Widget):
         right = Text()
         if self.syncing:
             right.append("⟳ syncing  ", p.style(p.primary_fg))
-        viewed = sum(1 for f in pr.files if f.is_viewed)
-        done = viewed == len(pr.files)
-        right.append(f"{viewed}/{len(pr.files)} viewed", p.style(p.add_fg if done else p.muted))
+        right.append_text(self._progress(pr, p))
         unresolved = pr.unresolved_count
         if unresolved:
             right.append(f"  ● {unresolved} open", p.style(p.accent_fg))
@@ -129,6 +129,23 @@ class PRHeader(Widget):
         bottom.pad_right(max(0, width - bottom.cell_len - right.cell_len))
         bottom.append_text(right)
         return Text("\n").join([top, bottom])
+
+    def _progress(self, pr: PullRequest, p: Palette) -> Text:
+        """How much of the change has been viewed, weighted by changed lines."""
+        files = [f for f in pr.files if f.path not in self.hidden] or pr.files
+        total = sum(max(1, f.additions + f.deletions) for f in files)
+        done = sum(max(1, f.additions + f.deletions) for f in files if f.is_viewed)
+        fraction = done / total if total else 1.0
+        viewed = sum(1 for f in files if f.is_viewed)
+        width = 10
+        filled = round(fraction * width)
+        color = p.add_fg if fraction >= 1 else p.primary_fg
+        text = Text()
+        text.append("━" * filled, p.style(color))
+        text.append("━" * (width - filled), p.style(p.fg_mix(0.18)))
+        text.append(f" {fraction:.0%}", p.style(color, bold=True))
+        text.append(f" · {viewed}/{len(files)} files", p.style(p.muted))
+        return text
 
     async def on_click(self, event) -> None:
         if event.y == 0 and self.pr is not None:

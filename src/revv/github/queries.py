@@ -275,6 +275,20 @@ mutation RemoveReaction($input: RemoveReactionInput!) {
 }
 """
 
+# Cheap enough to poll: just enough to notice that a pull request changed.
+FINGERPRINT = """
+query Fingerprint($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      headRefOid state isDraft
+      comments { totalCount }
+      reviews(first: 100) { nodes { id state } }
+      reviewThreads(first: 100) { nodes { id isResolved comments { totalCount } } }
+    }
+  }
+}
+"""
+
 # Deliberately light: per-PR fields like CI status, requested reviewers and diff size are
 # expensive for GitHub to compute, so they're fetched afterwards with PR_DETAILS.
 SEARCH_PULL_REQUESTS = """
@@ -284,11 +298,13 @@ query SearchPRs($query: String!) {
     issueCount
     nodes {
       ... on PullRequest {
-        id number title isDraft createdAt updatedAt headRefName
+        id number title isDraft createdAt updatedAt headRefName baseRefName
         author { login }
         repository { name owner { login } }
         labels(first: 6) { nodes { name color } }
         latestReviews(first: 30) { nodes { author { login } state } }
+        stack { id number size }
+        stackEntry { position }
       }
     }
   }
@@ -300,7 +316,7 @@ query Details($ids: [ID!]!) {
   viewer { login }
   nodes(ids: $ids) {
     ... on PullRequest {
-      id reviewDecision additions deletions
+      id reviewDecision additions deletions changedFiles
       comments { totalCount }
       assignees(first: 10) { nodes { login } }
       reviewRequests(first: 20) {

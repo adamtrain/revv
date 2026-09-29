@@ -14,6 +14,7 @@ from revv.models import (
     Comment,
     Commit,
     FileStatus,
+    Fingerprint,
     Label,
     PRRef,
     PRSummary,
@@ -844,6 +845,10 @@ class DemoBackend:
         await self._wait()
         return {(oid, path): self._texts.get(path) for oid, path in requests}
 
+    async def fingerprint(self, ref: PRRef) -> Fingerprint:
+        await self._wait()
+        return Fingerprint.of(self._pr)
+
     async def search_pull_requests(self, query: str) -> list[PRSummary]:
         await self._wait()
         pr = self._pr
@@ -925,17 +930,52 @@ class DemoBackend:
             deletions=97,
             comments=1,
         )
-        for item in (main, rereview, team, reviewed, mine):
+        stack_first = summary(
+            44,
+            "Extract URL helpers into netkit.urls",
+            "hubot",
+            30,
+            requested_directly=True,
+            review_decision="REVIEW_REQUIRED",
+            checks_state="SUCCESS",
+            additions=64,
+            deletions=41,
+            changed_files=3,
+            stack_id="STACK_3",
+            stack_number=3,
+            stack_size=3,
+            stack_position=1,
+            base_ref="main",
+        )
+        stack_second = summary(
+            46,
+            "Use the URL helpers in Client",
+            "hubot",
+            12,
+            requested_directly=True,
+            review_decision="REVIEW_REQUIRED",
+            checks_state="PENDING",
+            additions=22,
+            deletions=30,
+            changed_files=2,
+            stack_id="STACK_3",
+            stack_number=3,
+            stack_size=3,
+            stack_position=2,
+            base_ref="extract-url-helpers",
+        )
+        for item in (main, rereview, team, reviewed, mine, stack_first, stack_second):
             item.node_id = f"PR_{item.ref.number}"
+            item.base_ref = item.base_ref or "main"
         if "review-requested:@me" in query:
-            return [main, rereview, team]
+            return [main, rereview, team, stack_second, stack_first]
         if "assignee:@me" in query:
             return []
         if "reviewed-by:@me" in query:
             return [rereview, reviewed]
         if "author:@me" in query:
             return [mine]
-        return [main, rereview, team, reviewed, mine]
+        return [main, rereview, team, reviewed, mine, stack_first, stack_second]
 
     async def pull_request_details(self, items: list[PRSummary]) -> None:
         await self._wait()

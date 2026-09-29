@@ -15,6 +15,7 @@ from rich.text import Text
 from rich.theme import Theme as RichTheme
 from textual.strip import Strip
 
+from revv.config import display_name
 from revv.highlight import display_text
 from revv.models import Comment, ReviewThread
 from revv.ui.palette import Palette
@@ -132,7 +133,9 @@ class ThreadRenderer:
         bg = p.thread_bg
         text = Text(left, style=fill_style)
         text.append(" ")
-        text.append(comment.author, p.style(p.author_color(comment.author), bg, bold=True))
+        text.append(
+            display_name(comment.author), p.style(p.author_color(comment.author), bg, bold=True)
+        )
         if comment.author == pr_author:
             text.append(" author", p.style(p.faint, bg))
         text.append(f" · {relative_time(comment.created_at)}", p.style(p.muted, bg))
@@ -274,7 +277,7 @@ class ThreadRenderer:
         p = self.p
         bg = p.thread_bg
         if thread.is_resolved:
-            who = f" by {thread.resolved_by}" if thread.resolved_by else ""
+            who = f" by {display_name(thread.resolved_by)}" if thread.resolved_by else ""
             return Text(f" ✓ resolved{who} ", p.style(p.add_fg, bg))
         if thread.is_outdated:
             return Text(" outdated ", p.style(p.warning_fg, bg))
@@ -316,7 +319,9 @@ class ThreadRenderer:
             text.append("thread", p.style(p.muted, bg))
         if root is not None:
             text.append(" · ", p.style(p.faint, bg))
-            text.append(root.author, p.style(p.author_color(root.author), bg, bold=True))
+            text.append(
+                display_name(root.author), p.style(p.author_color(root.author), bg, bold=True)
+            )
             text.append(": ", p.style(p.faint, bg))
             first = " ".join(SUGGESTION_RE.sub("[suggestion] ", root.body).split())
             text.append(first, p.style(p.muted, bg, italic=True))

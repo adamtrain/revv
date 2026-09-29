@@ -105,6 +105,12 @@ class DiskCache:
         value = self._read(self.pr_path(ref))
         return value if isinstance(value, PullRequest) else None
 
+    def pr_saved_at(self, ref: PRRef) -> float | None:
+        try:
+            return self.pr_path(ref).stat().st_mtime
+        except OSError:
+            return None
+
     def save_pr(self, pr: PullRequest) -> None:
         self._write(self.pr_path(pr.ref), pr)
 

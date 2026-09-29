@@ -15,6 +15,7 @@ from revv.models import (
     ChangedFile,
     Comment,
     FileStatus,
+    Fingerprint,
     PRRef,
     PullRequest,
     Reaction,
@@ -32,6 +33,7 @@ class ReviewSession:
         self.ref = ref
         self.cache = cache
         self.fresh = False  # False while showing cached data that hasn't been re-synced yet
+        self.cached_at: float | None = None  # when the cached copy we opened was saved
         self._pr: PullRequest | None = None
         self._contents: dict[tuple[str, str], str | None] = {}
         self._inflight: dict[tuple[str, str], asyncio.Future[str | None]] = {}
@@ -56,11 +58,15 @@ class ReviewSession:
             if cached is not None:
                 self._pr = cached
                 self.fresh = False
+                self.cached_at = self.cache.pr_saved_at(self.ref)
                 return cached
         self._pr = await self.backend.load_pull_request(self.ref)
         self.fresh = True
         self.save()
         return self._pr
+
+    async def fingerprint(self) -> Fingerprint:
+        return await self.backend.fingerprint(self.ref)
 
     async def refresh(self) -> PullRequest:
         """Reload everything; patches are reused when the head commit hasn't moved."""

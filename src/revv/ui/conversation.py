@@ -18,6 +18,7 @@ from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Static
 
+from revv.config import display_name
 from revv.models import Comment, PullRequest, Review, ReviewThread
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
@@ -337,7 +338,7 @@ class ConversationView(VerticalScroll):
     def _description(self, pr: PullRequest, width: int, focused: bool) -> list[Strip]:
         p = self.palette
         header = Text()
-        header.append(pr.author, p.style(p.author_color(pr.author), p.bg, bold=True))
+        header.append(display_name(pr.author), p.style(p.author_color(pr.author), p.bg, bold=True))
         header.append(f" opened this {relative_time(pr.created_at)}", p.style(p.muted, p.bg))
         right = Text()
         for label in pr.labels[:4]:
@@ -359,14 +360,14 @@ class ConversationView(VerticalScroll):
             color = {"success": p.add_fg, "error": p.del_fg, "warning": p.warning_fg}.get(
                 tone, p.muted
             )
-            reviewers.append(login, p.style(p.author_color(login), p.bg, bold=True))
+            reviewers.append(display_name(login), p.style(p.author_color(login), p.bg, bold=True))
             reviewers.append(f" {verb}", p.style(color, p.bg))
             reviewers.append(" · ", p.style(p.faint, p.bg))
             seen.add(login)
         for login in pr.review_requests:
             if login in seen:
                 continue
-            reviewers.append(login, p.style(p.author_color(login), p.bg, bold=True))
+            reviewers.append(display_name(login), p.style(p.author_color(login), p.bg, bold=True))
             reviewers.append(" requested", p.style(p.warning_fg, p.bg))
             reviewers.append(" · ", p.style(p.faint, p.bg))
         if len(reviewers) > len("Reviewers: "):
@@ -378,7 +379,9 @@ class ConversationView(VerticalScroll):
     def _comment(self, comment: Comment, width: int, focused: bool, expanded: bool) -> list[Strip]:
         p = self.palette
         header = Text()
-        header.append(comment.author, p.style(p.author_color(comment.author), p.bg, bold=True))
+        header.append(
+            display_name(comment.author), p.style(p.author_color(comment.author), p.bg, bold=True)
+        )
         if self.pr is not None and comment.author == self.pr.author:
             header.append(" author", p.style(p.faint, p.bg))
         header.append(f" · {relative_time(comment.created_at)}", p.style(p.muted, p.bg))
@@ -406,7 +409,9 @@ class ConversationView(VerticalScroll):
         verb, tone = REVIEW_VERBS.get(review.state, (review.state.lower(), "muted"))
         color = {"success": p.add_fg, "error": p.del_fg, "warning": p.warning_fg}.get(tone, p.muted)
         header = Text()
-        header.append(review.author, p.style(p.author_color(review.author), p.bg, bold=True))
+        header.append(
+            display_name(review.author), p.style(p.author_color(review.author), p.bg, bold=True)
+        )
         header.append(f" {verb}", p.style(color, p.bg, bold=True))
         header.append(
             f" · {relative_time(review.submitted_at or review.created_at)}", p.style(p.muted, p.bg)
@@ -470,7 +475,9 @@ class ConversationView(VerticalScroll):
         root = thread.root
         if root is not None:
             text.append("  ")
-            text.append(root.author, p.style(p.author_color(root.author), bg, bold=True))
+            text.append(
+                display_name(root.author), p.style(p.author_color(root.author), bg, bold=True)
+            )
             text.append(": ", p.style(p.faint, bg))
             excerpt = SUGGESTION_RE.sub("[suggestion] ", root.body)
             text.append(" ".join(excerpt.split()), p.style(p.muted, bg, italic=True))

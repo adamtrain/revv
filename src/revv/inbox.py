@@ -62,6 +62,7 @@ DETAIL_FIELDS = (
     "review_decision",
     "additions",
     "deletions",
+    "changed_files",
     "comments",
     "requested_directly",
     "requested_teams",

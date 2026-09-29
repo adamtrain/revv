@@ -321,7 +321,7 @@ async def test_inbox_lists_requests_and_opens_by_number(backend: DemoBackend) ->
         inbox = app.screen
         assert isinstance(inbox, InboxScreen)
         requested = next(s for s in inbox.sections if s.key == "requested")
-        assert [i.ref.number for i in requested.items] == [42, 40, 17]
+        assert sorted(i.ref.number for i in requested.items) == [17, 40, 42, 44, 46]
         team = next(i for i in requested.items if i.ref.number == 17)
         assert team.requested_teams == ["acme/python-reviewers"] and not team.requested_directly
         await pilot.press("4", "2", "enter")
@@ -358,37 +358,169 @@ async def test_submit_request_changes_requires_feedback(app: RevvApp) -> None:
         assert screen.pr.pending_review is None
 
 
-async def test_hide_test_files_marks_them_viewed(app: RevvApp, backend: DemoBackend) -> None:
+async def test_test_files_start_hidden_and_t_toggles(app: RevvApp, backend: DemoBackend) -> None:
     async with app.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
         diff = screen.diff
         tests = {s.path for s in diff.sections if "test" in s.kinds}
         assert tests == {"tests/test_retry.py", "web/src/components/StatusBadge.test.tsx"}
-        await pilot.press("T")
-        await pilot.pause(0.2)
-        assert all(backend._pr.file(path).is_viewed for path in tests)  # type: ignore[union-attr]
-        visible = {s.path for s in diff.visible_sections}
-        assert not tests & visible
+        # hidden by default, without touching GitHub
+        assert not tests & {s.path for s in diff.visible_sections}
         assert not {r.section.path for r in diff.rows} & tests
         assert tests.isdisjoint(screen.file_tree._path_nodes)
         assert screen.query_one("#hidden-note").display
-        await pilot.press("T")
+        assert not any(backend._pr.file(path).is_viewed for path in tests)  # type: ignore[union-attr]
+        await pilot.press("T")  # show them
         await pilot.pause()
         assert tests <= {s.path for s in diff.visible_sections}
-        assert all(s.file.is_viewed for s in diff.sections if s.path in tests)
+        await pilot.press("T")  # hide them again, marking them as viewed
+        await pilot.pause(0.2)
+        assert not tests & {s.path for s in diff.visible_sections}
+        assert all(backend._pr.file(path).is_viewed for path in tests)  # type: ignore[union-attr]
 
 
-async def test_hide_generated_files(app: RevvApp, backend: DemoBackend) -> None:
+async def test_generated_files_start_hidden(app: RevvApp, backend: DemoBackend) -> None:
     async with app.run_test(size=SIZE) as pilot:
         screen = await loaded(pilot)
         generated = {s.path for s in screen.diff.sections if "generated" in s.kinds}
         assert generated == {"uv.lock"}
+        assert "uv.lock" not in {s.path for s in screen.diff.visible_sections}
+        await pilot.press("X")
+        await pilot.pause()
+        assert "uv.lock" in {s.path for s in screen.diff.visible_sections}
         await pilot.press("X")
         await pilot.pause(0.2)
         assert backend._pr.file("uv.lock").is_viewed  # type: ignore[union-attr]
-        assert "uv.lock" not in {s.path for s in screen.diff.visible_sections}
         # jumping to a hidden file (e.g. from the file finder) shows it again
         section = next(s for s in screen.diff.sections if s.path == "uv.lock")
         screen.go_to_section(section)
         await pilot.pause()
         assert screen.diff.current_section is section
+        assert "uv.lock" in screen.file_tree._path_nodes
+
+
+async def test_viewed_puts_next_file_header_at_top(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        diff = screen.diff
+        await pilot.press("v")
+        await pilot.pause(0.1)
+        row = diff.current_row
+        assert row is not None and row.kind is RowKind.FILE
+        assert round(diff.scroll_offset.y) == diff.cursor  # the header is the top line
+
+
+async def test_progress_is_weighted_by_changed_lines(app: RevvApp) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        header = screen.header
+        text = header._progress(screen.pr, header_palette(app)).plain
+        assert "%" in text and "files" in text
+        # hidden (test/generated) files don't count
+        visible = [f for f in screen.pr.files if f.path not in header.hidden]
+        assert f"/{len(visible)} files" in text
+
+
+def header_palette(app: RevvApp):
+    from revv.ui.palette import Palette
+
+    return Palette.from_app(app)
+
+
+async def test_notices_changes_on_github_and_refreshes(app: RevvApp, backend: DemoBackend) -> None:
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        banner = screen.query_one("#banner")
+        assert not banner.display
+        screen.check_for_changes()
+        await pilot.pause(0.1)
+        assert not banner.display  # nothing changed yet
+        # someone replies on GitHub
+        thread = backend._pr.threads[0]
+        thread.comments.append(backend._comment("mona", "Any update?", 0))
+        screen.check_for_changes()
+        await pilot.pause(0.1)
+        assert banner.display and "1 new comment" in str(banner.render())
+        await pilot.press("R")
+        await pilot.pause(0.2)
+        assert not banner.display
+        local = next(t for t in screen.pr.threads if t.id == thread.id)
+        assert local.comments[-1].body == "Any update?"
+
+
+async def test_nicknames(app: RevvApp) -> None:
+    from textual.widgets import Input
+
+    from revv import config
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        await pilot.press("at")
+        await pilot.pause()
+        dialog = app.screen
+        field = next(f for f in dialog.query(Input) if f.name == "mona")
+        field.value = "Mona Lisa"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert config.display_name("mona") == "Mona Lisa"
+        assert config.load_config()["nicknames"] == {"mona": "Mona Lisa"}
+        thread = next(
+            t
+            for t in screen.pr.threads
+            if t.root and t.root.author == "mona" and not t.is_resolved and not t.is_outdated
+        )
+        screen.diff.jump_to_thread(thread)
+        await pilot.pause()
+        rendered = screen.diff._render_thread(
+            screen.diff.current_section,
+            thread,
+            None,
+            False,  # type: ignore[arg-type]
+        )
+        assert "Mona Lisa" in rendered.strips[0].text
+
+
+async def test_inbox_sorting_stacks_and_ignoring(backend: DemoBackend) -> None:
+    from textual.widgets import OptionList
+
+    from revv import config
+    from revv.ui.inbox import Entry, StackHeader
+
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+
+        def order() -> list[str]:
+            items, _ = inbox._items()
+            rows = inbox._arrange(items)
+            return [
+                f"stack{r.item.stack_number}"
+                if isinstance(r, StackHeader)
+                else f"#{r.item.ref.number}"
+                for r in rows
+            ]
+
+        # oldest (lowest number) first; a stack stays together in stack order
+        assert order() == ["#17", "#40", "#42", "stack3", "#44", "#46"]
+        await pilot.press("s")
+        assert order() == ["stack3", "#44", "#46", "#42", "#40", "#17"]
+        assert config.load_config()["inbox_sort"] == "desc"
+        await pilot.press("s")
+
+        # ignore the highlighted pull request
+        options = inbox.query_one(OptionList)
+        options.highlighted = options.get_option_index("github.com/acme/netkit#17")
+        await pilot.press("i")
+        await pilot.pause()
+        assert "#17" not in order()
+        assert "github.com/acme/netkit#17" in config.ignored_prs()
+        await pilot.press("tab", "tab", "tab")  # to the Ignored tab
+        await pilot.pause()
+        assert inbox.current == "ignored" and order() == ["#17"]
+        await pilot.press("i")
+        await pilot.pause()
+        assert "github.com/acme/netkit#17" not in config.ignored_prs()
+        assert inbox.current == "requested"
+        assert all(isinstance(r, (Entry, StackHeader)) for r in inbox._arrange(inbox._items()[0]))
