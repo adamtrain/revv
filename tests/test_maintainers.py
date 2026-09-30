@@ -415,3 +415,27 @@ async def test_the_maintainers_card_leads_to_the_first_file_to_look_at(demo_is_o
         await pilot.press("m")
         await pilot.pause(0.2)
         assert diff.current_section is not None and diff.current_section.path == here.path
+
+
+async def test_maintainer_teams_can_be_nicknamed(demo_is_obsidian) -> None:
+    from textual.widgets import Input
+
+    from revv import config
+    from revv.ui.conversation import Card
+    from revv.ui.review import ReviewScreen
+
+    config.set_nicknames({"acme/python-reviewers": "Pythonistas"})
+    app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo)
+    async with app.run_test(size=(150, 45)) as pilot:
+        await pilot.pause(0.4)
+        screen = app.screen
+        assert isinstance(screen, ReviewScreen)
+        assert "Pythonistas" in str(screen.file_tree.root.children[0].label)
+        card = next(c for c in screen.query(Card) if c.item.kind == "maintainers")
+        card.focus()
+        await pilot.pause()
+        await pilot.press("at")  # the teams on the card
+        await pilot.pause()
+        names = sorted(str(f.name) for f in app.screen.query(Input))
+        assert names == ["acme/docs", "acme/python-reviewers", "acme/web-platform"]
+        await pilot.press("escape")

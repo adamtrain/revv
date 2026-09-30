@@ -23,7 +23,7 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "theme": None,
     "hide_by_default": ["test", "generated"],  # file kinds hidden when a PR opens
-    "nicknames": {},  # GitHub login -> the name you'd rather see
+    "nicknames": {},  # GitHub login (or "org/team") -> the name you'd rather see
     "ignored_prs": {},  # "host/owner/repo#number" -> when it was ignored (unix time)
     "inbox_sort": "asc",  # "asc": oldest (lowest number) first; "desc": newest first
     "refresh_interval": 30,  # seconds between checks for changes on GitHub; 0 turns them off
@@ -88,6 +88,16 @@ def nicknames() -> dict[str, str]:
 def display_name(login: str) -> str:
     """How a GitHub user is shown: their nickname if you gave them one."""
     return nicknames().get(login.lower(), login)
+
+
+def team_name(team: str, *, short: bool = False) -> str:
+    """How a team ("org/team") is shown: its nickname if you gave it one, otherwise its
+    name (without the organization when `short`)."""
+    slug = team.strip().lstrip("@")
+    nickname = nicknames().get(slug.lower())
+    if nickname:
+        return nickname
+    return slug.split("/", 1)[-1] if short else slug
 
 
 def set_nicknames(names: dict[str, str]) -> None:

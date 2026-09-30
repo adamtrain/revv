@@ -18,9 +18,9 @@ from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Static
 
-from revv.config import display_name
+from revv.config import display_name, team_name
 from revv.filters import ignores
-from revv.maintainers import Ownership, short_team, team_key
+from revv.maintainers import Ownership, team_key
 from revv.models import AiCheck, Comment, PullRequest, Review, ReviewThread
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
@@ -467,7 +467,8 @@ class ConversationView(VerticalScroll):
             counts,
             key=lambda t: (t is None, not (t and ownership.is_mine(t)), (t or "").lower()),
         )
-        width_name = max((len(short_team(t)) if t else 20 for t in order), default=10) + 2
+        width_name = max((len(team_name(t, short=True)) if t else 20 for t in order), default=10)
+        width_name += 2
         lines = []
         for team in order:
             count = counts[team]
@@ -476,10 +477,13 @@ class ConversationView(VerticalScroll):
                 text.append("  " + "no maintainer listed".ljust(width_name), p.style(p.faint, p.bg))
             elif ownership.is_mine(team):
                 text.append(
-                    "★ " + short_team(team).ljust(width_name), p.style(p.accent_fg, p.bg, bold=True)
+                    "★ " + team_name(team, short=True).ljust(width_name),
+                    p.style(p.accent_fg, p.bg, bold=True),
                 )
             else:
-                text.append("  " + short_team(team).ljust(width_name), p.style(p.text, p.bg))
+                text.append(
+                    "  " + team_name(team, short=True).ljust(width_name), p.style(p.text, p.bg)
+                )
             text.append(f"{count} file{'s' if count != 1 else ''}", p.style(p.muted, p.bg))
             if team is not None and ownership.is_mine(team):
                 text.append(" · your team", p.style(p.accent_fg, p.bg, italic=True))
@@ -526,7 +530,7 @@ class ConversationView(VerticalScroll):
         for team in teams:
             name = Text()
             name.append(" team ", p.style(p.primary_fg, p.mix(p.primary, 0.22), bold=True))
-            name.append(f" {team}", p.style(p.primary_fg, p.bg, bold=True))
+            name.append(f" {team_name(team)}", p.style(p.primary_fg, p.bg, bold=True))
             lines.append(name)
             lines.append(Text("  requested", p.style(p.warning_fg, p.bg)))
         return lines

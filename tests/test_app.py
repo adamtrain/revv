@@ -984,3 +984,57 @@ async def test_going_to_a_file_or_line_from_the_conversation(app: RevvApp) -> No
         assert row is not None and row.section in screen.diff.sections
         shown = row.right or row.line
         assert shown is not None and shown.new_no == line.new_no
+
+
+async def test_teams_can_be_nicknamed(app: RevvApp) -> None:
+    from textual.widgets import Input
+
+    from revv import config
+    from revv.ui.conversation import Card
+
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        assert "acme/python-reviewers" in screen.pr.team_review_requests
+        card = next(c for c in screen.query(Card) if c.item.kind == "description")
+        card.focus()
+        await pilot.pause()
+        await pilot.press("at")  # the author, the reviewers and the requested teams
+        await pilot.pause()
+        names = [str(f.name) for f in app.screen.query(Input)]
+        assert screen.pr.author in names and "acme/python-reviewers" in names
+        field = next(f for f in app.screen.query(Input) if f.name == "acme/python-reviewers")
+        field.value = "Pythonistas"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert config.team_name("acme/python-reviewers") == "Pythonistas"
+        assert config.team_name("@Acme/Python-Reviewers", short=True) == "Pythonistas"
+        assert config.team_name("acme/docs", short=True) == "docs"  # no nickname
+        lines = screen.conversation._reviewer_lines(screen.pr)
+        assert any("Pythonistas" in line.plain for line in lines)
+
+
+async def test_inbox_nickname_includes_the_requested_team(backend: DemoBackend) -> None:
+    import io
+
+    from rich.console import Console
+    from textual.widgets import Input, OptionList
+
+    from revv import config
+
+    config.set_nicknames({"acme/python-reviewers": "Pythonistas"})
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        options = inbox.query_one(OptionList)
+        key = "github.com/acme/netkit#17"  # requested from a team you're on
+        options.highlighted = options.get_option_index(key)
+        await pilot.press("at")
+        await pilot.pause()
+        assert [str(f.name) for f in app.screen.query(Input)] == ["mona", "acme/python-reviewers"]
+        await pilot.press("escape")
+        await pilot.pause()
+        console = Console(width=140, file=io.StringIO(), record=True)
+        console.print(options.get_option(key).prompt)
+        assert "team: Pythonistas" in console.export_text()

@@ -28,6 +28,7 @@ from revv.config import (
     save_config,
     set_ignored,
     setting,
+    team_name,
     update_nicknames,
 )
 from revv.filters import ignores
@@ -365,8 +366,10 @@ class InboxScreen(Screen):
                 item.head_ref,
                 item.ref.repo.full_name,
                 *item.requested_teams,
+                *(team_name(team) for team in item.requested_teams),
                 *(label.name for label in ignores().labels(item.labels)),
                 *self._maintainer_teams(item),
+                *(team_name(team) for team in self._maintainer_teams(item)),
             ]
         ).lower()
         return all(word in haystack for word in query.lower().split())
@@ -519,7 +522,7 @@ class InboxScreen(Screen):
             elif item.requested_directly:
                 reason.append(" requested: you ", p.style(p.bg, p.warning, bold=True))
             elif item.requested_teams:
-                teams = ", ".join(item.requested_teams[:2])
+                teams = ", ".join(team_name(team) for team in item.requested_teams[:2])
                 if len(item.requested_teams) > 2:
                     teams += f" +{len(item.requested_teams) - 2}"
                 reason.append(f" team: {teams} ", p.style(p.bg, p.primary, bold=True))
@@ -586,6 +589,11 @@ class InboxScreen(Screen):
         table.add_row(gutters[1], who, checks)
         table.add_row(gutters[2], detail, status)
         return table
+
+    def _teams_on_row(self, item: PRSummary) -> list[str]:
+        """The requested teams a row names (in its "team: …" badge)."""
+        shown = self.current == "requested" and item.details_loaded and not item.requested_directly
+        return list(item.requested_teams) if shown else []
 
     @staticmethod
     def _maintainer_teams(item: PRSummary) -> set[str]:
@@ -805,9 +813,8 @@ class InboxScreen(Screen):
         if item is None:
             self.notify("Highlight a pull request to nickname its author", timeout=2)
             return
-        result = await self.app.push_screen_wait(
-            NicknameDialog([item.author], setting("nicknames"))
-        )
+        names = [item.author, *self._teams_on_row(item)]
+        result = await self.app.push_screen_wait(NicknameDialog(names, setting("nicknames")))
         if result is not None:
             update_nicknames(result)
             self._render_list()

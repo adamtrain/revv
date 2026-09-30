@@ -117,7 +117,7 @@ palette.
 | `a` | this repository / all repositories |
 | `o` | open in the browser |
 | `r` `R` | refresh |
-| `@` | nickname for the author |
+| `@` | nickname the author (and a requested team) |
 | `q` | quit |
 
 | Moving around a pull request | |
@@ -193,7 +193,7 @@ palette.
 | Everywhere | |
 | --- | --- |
 | `,` | settings |
-| `@` | nicknames for the people in view |
+| `@` | nicknames for the people and teams in view |
 | `ctrl+p` | command palette: every action, themes |
 | `?` | this help |
 | `q` | back to the inbox / quit |

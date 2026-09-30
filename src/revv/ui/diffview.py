@@ -24,10 +24,11 @@ from textual.strip import Strip
 
 from revv import filters
 from revv.classify import GitAttributes
+from revv.config import team_name
 from revv.diff import DiffLine, LineKind
 from revv.filters import ignores
 from revv.highlight import display_text
-from revv.maintainers import Ownership, short_team
+from revv.maintainers import Ownership
 from revv.models import ChangedFile, Comment, FileStatus, PullRequest, ReviewThread, Side
 from revv.ui.diffmodel import MAX_WRAP_ROWS, FileSection, Geometry, Row, RowKind, build_rows
 from revv.ui.palette import Palette
@@ -1121,9 +1122,11 @@ class DiffView(ScrollView, can_focus=True):
             for team in self.ownership.teams_for(file.path):
                 text.append("  ")
                 if self.ownership.is_mine(team):
-                    text.append(f" ★ {short_team(team)} ", p.style(p.bg, p.accent, bold=True))
+                    name = team_name(team, short=True)
+                    text.append(f" ★ {name} ", p.style(p.bg, p.accent, bold=True))
                 else:
-                    text.append(f" {short_team(team)} ", p.style(p.muted, p.mix(p.fg, 0.08, bg)))
+                    name = team_name(team, short=True)
+                    text.append(f" {name} ", p.style(p.muted, p.mix(p.fg, 0.08, bg)))
         right = Text("", base)
         if section.pending_count:
             right.append(f" ✎ {section.pending_count} pending ", p.style(p.warning_fg, bg))

@@ -21,7 +21,7 @@ from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv import filters, panc
 from revv.classify import GitAttributes
-from revv.config import display_name, save_config, setting, update_nicknames
+from revv.config import display_name, save_config, setting, team_name, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
 from revv.maintainers import (
     Ownership,
@@ -29,7 +29,6 @@ from revv.maintainers import (
     find,
     maintainer_settings,
     save_maintainer_settings,
-    short_team,
     team_key,
 )
 from revv.models import (
@@ -403,10 +402,10 @@ class ReviewScreen(Screen):
             if group is None:
                 label.append("no maintainer listed", p.style(p.faint, bold=True))
             elif ownership.is_mine(group):
-                label.append(f"★ {short_team(group)}", p.style(p.accent_fg, bold=True))
+                label.append(f"★ {team_name(group, short=True)}", p.style(p.accent_fg, bold=True))
                 label.append(" your team", p.style(p.faint, italic=True))
             else:
-                label.append(short_team(group), p.style(p.muted, bold=True))
+                label.append(team_name(group, short=True), p.style(p.muted, bold=True))
             label.append(f" {len(members)}", p.style(p.faint))
             groups.append((label, members))
         return groups
@@ -733,7 +732,7 @@ class ReviewScreen(Screen):
         self.app.push_screen(HelpScreen(maintainers=applies_to(self.session.ref.repo)))
 
     def _people_here(self) -> list[str]:
-        """Who `@` renames: the people in whatever is selected."""
+        """Who `@` renames: the people and teams in whatever is selected."""
         pr = self.pr
 
         def authors(thread: ReviewThread) -> list[str]:
@@ -742,14 +741,19 @@ class ReviewScreen(Screen):
         if self.tab == "conversation":
             item = self.conversation.focused_item
             if item is None or item.kind == "description":
-                return [pr.author, *ConversationView.reviewer_logins(pr)]
+                reviewers = ConversationView.reviewer_logins(pr)
+                return [pr.author, *reviewers, *pr.team_review_requests]
+            if isinstance(item.obj, Ownership):
+                return list(item.obj.maintainers.files_by_team)
             if isinstance(item.obj, ReviewThread):
                 return authors(item.obj)
             return [getattr(item.obj, "author", pr.author)]
         thread = self.diff.active_thread
         if thread is not None:
             return authors(thread)
-        return [pr.author]
+        section = self.diff.current_section
+        teams = self.ownership.teams_for(section.path) if self.ownership and section else []
+        return [pr.author, *teams]  # and the teams named on the file's header
 
     def action_nicknames(self) -> None:
         self.edit_nicknames()
@@ -767,10 +771,13 @@ class ReviewScreen(Screen):
         self.notify("Nickname saved" if len(result) == 1 else "Nicknames saved", timeout=1.5)
 
     def refresh_names(self) -> None:
-        """Re-render everything that shows people's names."""
+        """Re-render everything that shows people's (and teams') names."""
         diff = self.diff
         diff._thread_cache.clear()
+        diff._code_cache.clear()
         diff.refresh()
+        if self.session.loaded:
+            self.rebuild_tree()
         self.conversation.refresh_cards()
         self.header.refresh()
         self.update_status()

@@ -220,7 +220,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("a", "this repository / all repositories"),
             ("o", "open in the browser"),
             ("r R", "refresh"),
-            ("@", "nickname for the author"),
+            ("@", "nickname the author (and a requested team)"),
             ("q", "quit"),
         ],
     ),
@@ -310,7 +310,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "Everywhere",
         [
             (",", "settings"),
-            ("@", "nicknames for the people in view"),
+            ("@", "nicknames for the people and teams in view"),
             ("ctrl+p", "command palette: every action, themes"),
             ("?", "this help"),
             ("q", "back to the inbox / quit"),
@@ -427,7 +427,7 @@ class HelpScreen(ModalScreen[None]):
 
 
 class NicknameDialog(ModalScreen[dict[str, str] | None]):
-    """Give people a name you'd rather see than their GitHub login."""
+    """Give people (and teams) a name you'd rather see than their GitHub login."""
 
     DEFAULT_CSS = """
     NicknameDialog { align: center middle; background: $background 55%; }
@@ -452,8 +452,10 @@ class NicknameDialog(ModalScreen[dict[str, str] | None]):
     ]
 
     def __init__(self, logins: list[str], nicknames: dict[str, str]) -> None:
+        """`logins` are people's logins and teams' "org/team" names."""
         super().__init__()
-        unique = {login.lower(): login for login in logins if login and "/" not in login}
+        cleaned = (login.strip().lstrip("@") for login in logins)
+        unique = {login.lower(): login for login in cleaned if login}
         self.logins = list(unique.values())
         self.nicknames = {login.lower(): name for login, name in nicknames.items()}
 
@@ -461,13 +463,18 @@ class NicknameDialog(ModalScreen[dict[str, str] | None]):
         with Vertical() as box:
             box.border_title = "Nickname" if len(self.logins) == 1 else "Nicknames"
             yield Static(
-                "Shown instead of the GitHub login, only to you. Leave it empty to use the login.",
+                "Shown instead of the GitHub login or team name, only to you. "
+                "Leave it empty to use the original.",
                 id="intro",
             )
             with VerticalScroll():
                 for login in self.logins:
                     with Horizontal(classes="person"):
-                        yield Static(login)
+                        if "/" in login:  # a team: "org/team"
+                            label = Text.assemble(("team ", "dim"), login.split("/", 1)[1])
+                            yield Static(label)
+                        else:
+                            yield Static(login)
                         yield Input(
                             self.nicknames.get(login.lower(), ""),
                             placeholder=login,
