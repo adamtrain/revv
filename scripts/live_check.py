@@ -342,12 +342,14 @@ async def _viewed(session: ReviewSession) -> None:
     expect(files, "need unviewed files")
     await session.set_viewed_many(files, True)
     fresh = await session.refresh()
-    for file in files:
-        expect(fresh.file(file.path).is_viewed, f"{file.path} should be viewed")  # type: ignore[union-attr]
-    await session.set_viewed_many([fresh.file(f.path) for f in files], False)  # type: ignore[misc]
+    refreshed = [fresh.file(f.path) for f in files]
+    for file, now in zip(files, refreshed, strict=True):
+        expect(now is not None and now.is_viewed, f"{file.path} should be viewed")
+    await session.set_viewed_many([f for f in refreshed if f is not None], False)
     fresh = await session.refresh()
     for file in files:
-        expect(not fresh.file(file.path).is_viewed, f"{file.path} should be unviewed")  # type: ignore[union-attr]
+        now = fresh.file(file.path)
+        expect(now is not None and not now.is_viewed, f"{file.path} should be unviewed")
 
 
 async def _pending(session: ReviewSession) -> None:

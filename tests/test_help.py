@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from textual.binding import Binding
+
 from revv.ui.app import RevvApp
 from revv.ui.conversation import ConversationView
 from revv.ui.dialogs import (
@@ -38,10 +40,12 @@ def test_every_binding_is_in_the_help() -> None:
         CommentEditor,
         SubmitReviewDialog,
     ):
-        for binding in cls.BINDINGS:
-            keys = [display_key(key.strip()) for key in binding.key.split(",")]  # type: ignore[union-attr]
+        for entry in cls.BINDINGS:
+            binding = entry if isinstance(entry, Binding) else Binding(*entry)
+            # "pagedown,ctrl+f,space" is one binding: any of its keys may document it
+            keys = [display_key(key.strip()) for key in binding.key.split(",")]
             if not any(key in documented for key in keys):
-                missing.append(f"{cls.__name__}: {binding.key} ({binding.action})")  # type: ignore[union-attr]
+                missing.append(f"{cls.__name__}: {binding.key} ({binding.action})")
     assert not missing, "undocumented keys:\n" + "\n".join(missing)
 
 

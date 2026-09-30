@@ -41,7 +41,7 @@ def _now() -> datetime:
 
 
 # Replaceable clock (the screenshot script freezes time so images don't drift).
-clock = _now
+clock: Callable[[], datetime] = _now
 
 
 def relative_time(when: datetime | None, now: datetime | None = None) -> str:

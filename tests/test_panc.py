@@ -13,6 +13,7 @@ from revv.cache import DiskCache
 from revv.config import save_config
 from revv.demo import DEMO_REF, DemoBackend
 from revv.ui.app import RevvApp
+from revv.ui.conversation import Card
 from revv.ui.review import ReviewScreen
 
 FAKE_PANC = """#!{python}
@@ -93,8 +94,8 @@ async def test_runs_once_per_description_and_is_cached(fake_panc: Path, tmp_path
         assert screen.ai_check is not None and screen.ai_check.verdict == "Mixed"
         assert "MIXED" in str(screen.header.render())
         description = next(
-            c for c in screen.conversation.query("Card") if c.item.kind == "description"
-        )  # type: ignore[attr-defined]
+            c for c in screen.conversation.query(Card) if c.item.kind == "description"
+        )
         text = "\n".join(strip.text for strip in description.strips(description.size.width))
         assert "40% AI" in text and "humanized" in text
     assert calls(fake_panc) == 1

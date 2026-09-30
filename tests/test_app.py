@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from textual.pilot import Pilot
-from textual.widgets import TextArea
+from textual.widgets import RadioButton, TextArea
 
 from revv.demo import DEMO_REF, DemoBackend
 from revv.diff import LineKind
-from revv.models import ReviewEvent, Side
+from revv.models import Comment, PullRequest, ReviewEvent, ReviewThread, Side
 from revv.ui.app import RevvApp
 from revv.ui.conversation import Card, ConversationView
+from revv.ui.dialogs import SubmitReviewDialog
 from revv.ui.diffmodel import Row, RowKind
 from revv.ui.diffview import DiffView
 from revv.ui.editor import CommentEditor
@@ -34,6 +35,13 @@ async def loaded(pilot: Pilot, tab: str = "files") -> ReviewScreen:
                 return screen
         await pilot.pause(0.02)
     raise AssertionError("review screen never loaded")
+
+
+def viewed(pr: PullRequest, path: str) -> bool:
+    """Whether a file of the pull request is marked viewed (it must be one of its files)."""
+    file = pr.file(path)
+    assert file is not None, path
+    return file.is_viewed
 
 
 async def type_text(pilot: Pilot, text: str) -> None:
@@ -205,7 +213,7 @@ async def test_mark_viewed_moves_on(app: RevvApp, backend: DemoBackend) -> None:
         await pilot.press("v")
         await pilot.pause(0.1)
         assert first.file.is_viewed and first.collapsed
-        assert backend._pr.file(first.path).is_viewed  # type: ignore[union-attr]
+        assert viewed(backend._pr, first.path)
         assert diff.current_section is not first
         assert diff.current_section is not None and not diff.current_section.file.is_viewed
 
@@ -271,8 +279,8 @@ async def test_general_comment_and_resolving_it(app: RevvApp, backend: DemoBacke
         await pilot.press("x")
         await pilot.pause(0.1)
         comment = target.item.obj
-        assert comment.is_resolved  # type: ignore[union-attr]
-        stored = next(c for c in backend._pr.comments if c.id == comment.id)  # type: ignore[union-attr]
+        assert isinstance(comment, Comment) and comment.is_resolved
+        stored = next(c for c in backend._pr.comments if c.id == comment.id)
         assert stored.is_minimized and stored.minimized_reason == "RESOLVED"
 
 
@@ -356,9 +364,10 @@ async def test_submit_request_changes_requires_feedback(app: RevvApp) -> None:
         await pilot.press("S")
         await pilot.pause()
         dialog = app.screen
-        dialog.query_one("#event").query("RadioButton")[2].value = True  # Request changes
+        assert isinstance(dialog, SubmitReviewDialog)
+        dialog.query_one("#event").query(RadioButton)[2].value = True  # Request changes
         await pilot.pause()
-        assert dialog.event is ReviewEvent.REQUEST_CHANGES  # type: ignore[attr-defined]
+        assert dialog.event is ReviewEvent.REQUEST_CHANGES
         await pilot.press("ctrl+s")
         await pilot.pause(0.2)
         # there is one pending comment, so an empty body is fine
@@ -376,14 +385,14 @@ async def test_test_files_start_hidden_and_t_toggles(app: RevvApp, backend: Demo
         assert not {r.section.path for r in diff.rows} & tests
         assert tests.isdisjoint(screen.file_tree._path_nodes)
         assert screen.query_one("#hidden-note").display
-        assert not any(backend._pr.file(path).is_viewed for path in tests)  # type: ignore[union-attr]
+        assert not any(viewed(backend._pr, path) for path in tests)  # type: ignore[union-attr]
         await pilot.press("T")  # show them
         await pilot.pause()
         assert tests <= {s.path for s in diff.visible_sections}
         await pilot.press("T")  # hide them again, marking them as viewed
         await pilot.pause(0.2)
         assert not tests & {s.path for s in diff.visible_sections}
-        assert all(backend._pr.file(path).is_viewed for path in tests)  # type: ignore[union-attr]
+        assert all(viewed(backend._pr, path) for path in tests)  # type: ignore[union-attr]
 
 
 async def test_generated_files_start_hidden(app: RevvApp, backend: DemoBackend) -> None:
@@ -397,7 +406,7 @@ async def test_generated_files_start_hidden(app: RevvApp, backend: DemoBackend) 
         assert "uv.lock" in {s.path for s in screen.diff.visible_sections}
         await pilot.press("X")
         await pilot.pause(0.2)
-        assert backend._pr.file("uv.lock").is_viewed  # type: ignore[union-attr]
+        assert viewed(backend._pr, "uv.lock")
         # jumping to a hidden file (e.g. from the file finder) shows it again
         section = next(s for s in screen.diff.sections if s.path == "uv.lock")
         screen.go_to_section(section)
@@ -482,12 +491,9 @@ async def test_nicknames(app: RevvApp) -> None:
         assert config.display_name("mona") == "Mona Lisa"
         # other nicknames are kept
         assert config.load_config()["nicknames"] == {"hubot": "Robot", "mona": "Mona Lisa"}
-        rendered = screen.diff._render_thread(
-            screen.diff.current_section,  # type: ignore[arg-type]
-            thread,
-            None,
-            False,
-        )
+        section = screen.diff.current_section
+        assert section is not None
+        rendered = screen.diff._render_thread(section, thread, None, False)
         assert "Mona Lisa" in rendered.strips[0].text
         # on the description card: the author and every reviewer
         await pilot.press("2")
@@ -638,8 +644,8 @@ async def test_changes_since_last_review(app: RevvApp, backend: DemoBackend) -> 
         screen.diff.jump_to_section(client)
         await pilot.press("v")
         await pilot.pause(0.2)
-        assert screen.pr.file("src/netkit/client.py").is_viewed  # type: ignore[union-attr]
-        assert backend._pr.file("src/netkit/client.py").is_viewed  # type: ignore[union-attr]
+        assert viewed(screen.pr, "src/netkit/client.py")
+        assert viewed(backend._pr, "src/netkit/client.py")
         await pilot.press("L")
         await pilot.pause(0.2)
         assert screen.since is None
@@ -738,7 +744,8 @@ async def test_thread_navigation_all_and_unresolved(app: RevvApp) -> None:
         assert set(unresolved) == expected  # and it wraps around
         await pilot.press("U")
         await pilot.pause()
-        assert diff.current_row is not None and not diff.current_row.thread.is_resolved  # type: ignore[union-attr]
+        row = diff.current_row
+        assert row is not None and row.thread is not None and not row.thread.is_resolved
 
 
 async def test_inbox_scope_toggle(backend: DemoBackend) -> None:
@@ -816,7 +823,8 @@ async def test_outdated_thread_on_a_file_no_longer_in_the_diff(app: RevvApp) -> 
             raise AssertionError("u never reached the outdated thread")
         await pilot.press("v")  # not part of the diff: nothing to mark
         await pilot.pause()
-        assert not screen.diff.current_section.file.is_viewed  # type: ignore[union-attr]
+        section = screen.diff.current_section
+        assert section is not None and not section.file.is_viewed
 
 
 async def test_a_stack_with_one_pull_request_here_is_a_plain_row(backend: DemoBackend) -> None:
@@ -905,12 +913,12 @@ async def test_refreshing_never_marks_default_hidden_files_viewed(
         await pilot.press("R")
         await pilot.pause(0.3)
         for path in ("tests/test_retry.py", "web/src/components/StatusBadge.test.tsx", "uv.lock"):
-            assert not backend._pr.file(path).is_viewed, path  # type: ignore[union-attr]
+            assert not viewed(backend._pr, path), path
         # after T (show) and T (hide + mark), newly refreshed test files do get marked
         await pilot.press("T", "T")
         await pilot.pause(0.3)
-        assert backend._pr.file("tests/test_retry.py").is_viewed  # type: ignore[union-attr]
-        assert not backend._pr.file("uv.lock").is_viewed  # type: ignore[union-attr]
+        assert viewed(backend._pr, "tests/test_retry.py")
+        assert not viewed(backend._pr, "uv.lock")
         assert screen.diff.hidden_kinds == {"test", "generated"}
 
 
@@ -952,7 +960,8 @@ async def test_jumping_to_a_thread_after_a_refresh_while_on_the_conversation(
         await pilot.pause(0.2)
         row = screen.diff.current_row
         assert row is not None and row.thread is not None
-        assert row.thread.id == card.item.obj.id
+        thread = card.item.obj
+        assert isinstance(thread, ReviewThread) and row.thread.id == thread.id
         assert row.section in screen.diff.sections  # not a file from before the refresh
 
 
