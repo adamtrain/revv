@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -13,6 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from revv import filters, panc
+from revv import summary as summarizer
 from revv.cache import default_cache_dir
 from revv.config import config_path, ignored_prs, save_config, set_nicknames, setting
 from revv.maintainers import MaintainerSettings, applies_to
@@ -161,6 +163,21 @@ class SettingsScreen(ModalScreen[None]):
                 )
                 yield Static(note, classes="note")
 
+                yield Static("Summaries", classes="heading")
+                yield self._switch(
+                    "Summarize descriptions longer than a screen with Claude",
+                    "summaries",
+                    setting("summaries") is not False,
+                )
+                note = (
+                    f"Uses {summarizer.MODEL_NAME} through Anthropic's API, which gets the "
+                    "description. Summaries are cached per pull request and redone when the "
+                    "description changes by 10% or more; D shows the original."
+                )
+                if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+                    note += " Needs ANTHROPIC_API_KEY in the environment, which isn't set."
+                yield Static(note, classes="note")
+
                 yield Static("Appearance", classes="heading")
                 with Horizontal(classes="row"):
                     yield Label("Theme (also in the command palette)")
@@ -293,6 +310,15 @@ class SettingsScreen(ModalScreen[None]):
                 kinds.append("generated")
             save_config(hide_by_default=kinds)
             self.notify("Applies to pull requests you open from now on", timeout=2)
+        elif event.switch.id == "summaries":
+            save_config(summaries=event.value)
+            from revv.ui.review import ReviewScreen
+
+            for screen in self.app.screen_stack:
+                if isinstance(screen, ReviewScreen):
+                    screen.conversation.refresh_cards()  # show or hide a summary it has
+                    if event.value:
+                        screen.summarize_description()
         elif event.switch.id == "panc":
             save_config(panc=event.value)
             if event.value and panc.executable() is None:

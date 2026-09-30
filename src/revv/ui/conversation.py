@@ -18,10 +18,11 @@ from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Static
 
-from revv.config import display_name, team_name
+from revv.config import display_name, setting, team_name
 from revv.filters import ignores
 from revv.maintainers import Ownership, team_key
-from revv.models import AiCheck, Comment, PullRequest, Review, ReviewThread
+from revv.models import AiCheck, Comment, DescriptionSummary, PullRequest, Review, ReviewThread
+from revv.panc import changed_enough
 from revv.ui.palette import Palette
 from revv.ui.render import SUGGESTION_RE, MarkdownRenderer, relative_time, segments
 
@@ -125,6 +126,9 @@ class ConversationView(VerticalScroll):
     class ShowFiles(Message):
         """Show the files (from the maintainer teams card)."""
 
+    class Resized(Message):
+        """The view changed size: a description may no longer fit on one screen."""
+
     class Focused(Message):
         def __init__(self, item: Item) -> None:
             super().__init__()
@@ -138,6 +142,9 @@ class ConversationView(VerticalScroll):
         self._md: MarkdownRenderer | None = None
         self._expanded: dict[str, bool] = {}
         self.ai: AiCheck | None = None  # panc's verdict on the description
+        self.summary: DescriptionSummary | None = None  # Claude's, of a long description
+        self.summarizing = False
+        self.show_original = False  # D: the original description instead of the summary
         self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
         self.ai_running = False
 
@@ -215,6 +222,86 @@ class ConversationView(VerticalScroll):
                 if self.screen.focused is None or isinstance(self.screen.focused, Card):
                     card.focus()
                 return
+
+    def on_resize(self) -> None:
+        self.post_message(self.Resized())
+
+    # -- Claude's summary of a long description ---------------------------------------
+
+    def set_summary(self, summary: DescriptionSummary | None, running: bool) -> None:
+        self.summary, self.summarizing = summary, running
+        self._refresh_description()
+
+    def _refresh_description(self) -> None:
+        self.version += 1
+        for card in self.query(Card):
+            if card.item.kind == "description":
+                card.invalidate()
+
+    @property
+    def summary_ready(self) -> bool:
+        """Whether there's a summary that still fits the description (<10% changed)."""
+        summary, pr = self.summary, self.pr
+        return (
+            summary is not None
+            and not summary.error
+            and bool(summary.summary)
+            and pr is not None
+            and not changed_enough(summary.text, pr.body.strip())
+            and setting("summaries") is not False
+        )
+
+    @property
+    def showing_summary(self) -> bool:
+        return self.summary_ready and not self.show_original
+
+    def toggle_summary(self) -> bool:
+        """D: the summary or the original description; True if the summary is shown now."""
+        self.show_original = not self.show_original
+        self._refresh_description()
+        return self.showing_summary
+
+    def focus_description(self) -> None:
+        for card in self.query(Card):
+            if card.item.kind == "description":
+                card.focus()
+                self.scroll_home(animate=False)
+                return
+
+    def description_overflows(self, pr: PullRequest) -> bool:
+        """Whether the description is longer than one screen of the conversation (sized
+        like the app when the view isn't laid out yet)."""
+        width = max(40, (self.size.width or self.app.size.width) - 5)
+        height = max(8, self.size.height or self.app.size.height - 5)
+        return len(self._description(pr, width, False, original=True)) > height
+
+    def _summary_note(self, width: int) -> list[Strip]:
+        """A line above the description about Claude's summary of it."""
+        p = self.palette
+        bg = p.style(bg=p.bg)
+        star = p.style(p.accent_fg, p.bg, bold=True)
+        quiet = p.style(p.faint, p.bg, italic=True)
+        text = Text()
+        summary, pr = self.summary, self.pr
+        if self.showing_summary:
+            text.append("✦ Summary by Claude", star)
+            text.append(" · D shows the original", quiet)
+        elif self.summary_ready:
+            text.append("✦ ", star)
+            text.append("D shows Claude's summary", quiet)
+        elif self.summarizing:
+            text.append("✦ ", star)
+            text.append("Claude is summarizing this long description…", quiet)
+        elif (
+            summary is not None
+            and summary.error
+            and pr is not None
+            and not changed_enough(summary.text, pr.body.strip())
+        ):
+            text.append(f"✦ No summary: {summary.error}", quiet)
+        else:
+            return []
+        return [self._render_text(text, width, bg), Strip.blank(width, bg)]
 
     def set_ai_check(self, check: AiCheck | None, running: bool) -> None:
         self.ai, self.ai_running = check, running
@@ -403,8 +490,12 @@ class ConversationView(VerticalScroll):
             text.append(" ")
         return [self._render_text(text, width, p.style(bg=p.bg))]
 
-    def _description(self, pr: PullRequest, width: int, focused: bool) -> list[Strip]:
+    def _description(
+        self, pr: PullRequest, width: int, focused: bool, *, original: bool = False
+    ) -> list[Strip]:
         p = self.palette
+        summarized = not original and self.showing_summary and self.summary is not None
+        body_text = self.summary.summary if summarized and self.summary else pr.body
         header = Text()
         header.append(display_name(pr.author), p.style(p.author_color(pr.author), p.bg, bold=True))
         header.append(f" opened this {relative_time(pr.created_at)}", p.style(p.muted, p.bg))
@@ -425,7 +516,8 @@ class ConversationView(VerticalScroll):
         if people and inner - side - 3 >= 48:
             # reviewers in a column to the right of the description
             left_width = inner - side - 3
-            left = self._markdown(pr.body, left_width)
+            note = [] if original else self._summary_note(left_width)
+            left = [*note, *self._markdown(body_text, left_width)]
             column = [self._render_text(line, side, bg) for line in people]
             divider = Segment(" │ ", p.style(p.fg_mix(0.15), p.bg))
             body = [
@@ -443,7 +535,8 @@ class ConversationView(VerticalScroll):
                 for i in range(max(len(left), len(column)))
             ]
         else:
-            body = self._markdown(pr.body, inner)
+            note = [] if original else self._summary_note(inner)
+            body = [*note, *self._markdown(body_text, inner)]
             if people:
                 body.append(Strip.blank(inner, bg))
                 body += [self._render_text(line, inner, bg) for line in people]

@@ -20,6 +20,7 @@ from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Static, Tree
 
 from revv import filters, panc
+from revv import summary as summarizer
 from revv.classify import GitAttributes
 from revv.config import display_name, save_config, setting, team_name, update_nicknames
 from revv.diff import DiffLine, LineKind, parse_patch
@@ -36,6 +37,7 @@ from revv.models import (
     AiCheck,
     ChangedFile,
     Comment,
+    DescriptionSummary,
     Fingerprint,
     PullRequest,
     Review,
@@ -184,6 +186,7 @@ class ReviewScreen(Screen):
         Binding("y", "copy_location", "Copy location", show=False),
         Binding("at", "nicknames", "Nicknames", show=False),
         Binding("L", "since_review", "Since last review", show=False),
+        Binding("D", "toggle_summary", "Summary / original description", show=False),
         Binding("m", "group_by_team", "Group by team", show=False),
         Binding("M", "only_mine", "Only your teams' files", show=False),
         Binding("less_than_sign", "sidebar_width(-4)", "Narrower tree", show=False),
@@ -208,6 +211,8 @@ class ReviewScreen(Screen):
             None  # remote state known to change nothing visible
         )
         self.ai_check: AiCheck | None = None  # panc's verdict on the description
+        self.summary: DescriptionSummary | None = None  # Claude's, of a long description
+        self._summarizing = False
         self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
         settings = maintainer_settings(session.ref.repo)
         self.group_by_team = settings.group_by_team if settings else True
@@ -357,6 +362,8 @@ class ReviewScreen(Screen):
             self._mark_hidden_viewed()
         if setting("panc") and panc.executable() is not None:
             self.check_description()
+        if summarizer.available():
+            self.call_after_refresh(self.summarize_description)  # once the sizes are known
 
     def rebuild_tree(self) -> None:
         diff = self.diff
@@ -580,6 +587,11 @@ class ReviewScreen(Screen):
     def show_files(self) -> None:
         self.action_switch_tab("files")
 
+    @on(ConversationView.Resized)
+    def conversation_resized(self) -> None:
+        if self.session.loaded and summarizer.available():
+            self.summarize_description()  # it may not fit on one screen anymore
+
     @on(ConversationView.Focused)
     def conversation_focused(self) -> None:
         self.update_status()
@@ -595,6 +607,9 @@ class ReviewScreen(Screen):
         if self.tab == "conversation":
             item = self.conversation.focused_item
             hints: list[tuple[str, str]] = [("j/k", "move")]
+            if item is not None and item.kind == "description" and self.conversation.summary_ready:
+                showing = self.conversation.showing_summary
+                hints.append(("D", "original" if showing else "Claude's summary"))
             if item is not None and item.kind == "thread":
                 hints += [("↵", "jump to code"), ("r", "reply"), ("x", "resolve")]
             elif item is not None and item.kind in ("comment", "review"):
@@ -1482,6 +1497,68 @@ class ReviewScreen(Screen):
         when = relative_time(review.submitted_at)
         commit = (review.commit_oid or "")[:7]
         return f"⟲ Only changes since your last review ({when}, {commit}) · L shows everything"
+
+    # -- Claude's summary of a long description ----------------------------------------
+
+    @work(group="summary")
+    async def summarize_description(self) -> None:
+        """Show Claude's summary of a description longer than a screen: the cached one while
+        it still fits (the description changed by less than 10%), else a new one."""
+        if self._summarizing or not summarizer.available() or not self.session.loaded:
+            return
+        self._summarizing = True
+        try:
+            await self._summarize()
+        finally:
+            self._summarizing = False
+
+    async def _summarize(self) -> None:
+        session = self.session
+        body = self.pr.body.strip()
+        if not body:
+            return
+        known = self.summary
+        if known is None and session.cache is not None:
+            known = await asyncio.to_thread(session.cache.load_summary, session.ref)
+            self.summary = known
+        if known is not None:
+            self.conversation.set_summary(known, running=False)
+            if not summarizer.changed_enough(known.text, body):
+                return  # it still fits (or failed on this very text already)
+        if not session.fresh:
+            return  # wait for GitHub's copy: the description may still change
+        if not self.conversation.description_overflows(self.pr):
+            return  # it fits on a screen as it is
+        self.conversation.set_summary(known, running=True)
+        result = await summarizer.summarize(self.pr.title, body)
+        self.summary = result
+        self.conversation.set_summary(result, running=False)
+        if session.cache is not None and (result.error is None or result.refused):
+            await asyncio.to_thread(session.cache.save_summary, session.ref, result)
+        if result.error and not result.refused:
+            self.notify(result.error, title="Summary", severity="warning", timeout=5)
+        self.update_status()
+
+    def action_toggle_summary(self) -> None:
+        """D: Claude's summary of a long description, or the original."""
+        if not self.session.loaded:
+            return
+        conversation = self.conversation
+        if not conversation.summary_ready:
+            if conversation.summarizing:
+                message = "Claude is still summarizing the description"
+            elif not summarizer.available():
+                message = "Summaries need ANTHROPIC_API_KEY (and the setting on: ,)"
+            else:
+                message = "Only descriptions longer than a screen get a summary"
+            self.notify(message, timeout=3)
+            return
+        shown = conversation.toggle_summary()
+        if self.tab != "conversation":
+            self.action_switch_tab("conversation")
+        conversation.focus_description()
+        self.notify("Claude's summary" if shown else "The original description", timeout=1.5)
+        self.update_status()
 
     # -- AI check of the description (panc) --------------------------------------------
 

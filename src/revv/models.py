@@ -352,6 +352,18 @@ class AiCheck:
     error: str | None = None
 
 
+@dataclass(slots=True)
+class DescriptionSummary:
+    """Claude's summary of a pull request description too long for one screen."""
+
+    text: str  # the description that was summarized
+    summary: str = ""  # markdown
+    model: str = ""
+    created_at: float = 0.0
+    error: str | None = None
+    refused: bool = False  # Claude declined: asking again about the same text won't help
+
+
 @dataclass(frozen=True)
 class Fingerprint:
     """What a pull request looks like at a glance, to notice changes on GitHub."""

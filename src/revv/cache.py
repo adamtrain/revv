@@ -24,7 +24,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from revv.models import AiCheck, PRRef, PullRequest, RepoRef
+from revv.models import AiCheck, DescriptionSummary, PRRef, PullRequest, RepoRef
 
 
 def _schema() -> str:
@@ -166,6 +166,26 @@ class DiskCache:
     def save_ai_check(self, ref: PRRef, check: AiCheck) -> None:
         self._write(self.ai_check_path(ref), check)
 
+    # -- summaries of long descriptions (Claude) --------------------------------------
+
+    def summary_path(self, ref: PRRef) -> Path:
+        repo = ref.repo
+        return (
+            self.root
+            / "summaries"
+            / _slug(repo.host)
+            / _slug(repo.owner)
+            / _slug(repo.name)
+            / f"{ref.number}.bin"
+        )
+
+    def load_summary(self, ref: PRRef) -> DescriptionSummary | None:
+        value = self._read(self.summary_path(ref))
+        return value if isinstance(value, DescriptionSummary) else None
+
+    def save_summary(self, ref: PRRef, summary: DescriptionSummary) -> None:
+        self._write(self.summary_path(ref), summary)
+
     # -- your teams ------------------------------------------------------------------
 
     def teams_path(self, host: str, org: str, login: str) -> Path:
@@ -219,6 +239,7 @@ class DiskCache:
         """Drop stale entries and keep the file cache under its size budget."""
         now = time.time()
         self._prune_tree(self.root / "prs", now - PR_MAX_AGE)
+        self._prune_tree(self.root / "summaries", now - PR_MAX_AGE)
         blobs = self._prune_tree(self.root / "blobs", now - BLOB_MAX_AGE)
         total = sum(size for _, size, _ in blobs)
         for path, size, _ in sorted(blobs, key=lambda entry: entry[2]):

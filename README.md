@@ -80,7 +80,8 @@ opens any pull request.
 
 **The conversation** is where a pull request opens: the description with its reviewers beside
 it, every review thread at a glance (`↵` jumps to it in the code), and the timeline. `x`
-resolves a general comment the way GitHub does, by hiding it as "resolved".
+resolves a general comment the way GitHub does, by hiding it as "resolved". A description too
+long for one screen comes summarized by Claude when you have an `ANTHROPIC_API_KEY` (below).
 
 <p align="center">
   <img src="docs/split.svg" width="880" alt="The side-by-side diff: old code on the left and new code on the right, with the changed words highlighted within changed lines.">
@@ -181,6 +182,7 @@ palette.
 | `x` | resolve / unresolve |
 | `e` `d` `+` `i` | edit · delete · react · ignore |
 | `C` | comment on the pull request |
+| `D` | a long description: Claude's summary / the original |
 
 | Writing a comment | |
 | --- | --- |
@@ -214,6 +216,7 @@ Press `,` to change any of these in the app; they're saved right away to
 | `sidebar_width` | `34` | file tree width (also `<` and `>`) |
 | `inbox_sort` | `"asc"` | oldest first; `"desc"` for newest first |
 | `nicknames` | `{}` | GitHub login or `org/team` → the name you'd rather see (`@` sets them) |
+| `summaries` | `true` | summarize long descriptions with Claude, given `ANTHROPIC_API_KEY` (below) |
 | `panc` | `false` | check descriptions for AI writing (below) |
 | `ignored_labels` | `[]` | labels treated as if they don't exist; `*` matches anything |
 | `ignored_comments` | `[]` | comments treated as if they don't exist (below) |
@@ -245,6 +248,15 @@ or `testimonials.tsx` are never caught:
 - **Generated:** lockfiles, minified files and source maps, protobuf and gRPC output,
   `__generated__/` folders, files that start with an `@generated` or `DO NOT EDIT` header,
   and anything your repository marks `linguist-generated` in `.gitattributes`.
+
+### Summaries of long descriptions
+
+With `ANTHROPIC_API_KEY` set, a description too long to fit on one screen is summarized by
+Claude Sonnet 5.5, and the conversation shows the summary: what changed, why, and how it was
+tested, in about 300 words. `D` switches between the summary and the original. Summaries are
+cached per pull request and redone only when the description changes by at least 10%. The
+description is sent to Anthropic's API; `"summaries": false` (or the switch in the settings)
+turns this off.
 
 ### AI-writing check with panc
 
