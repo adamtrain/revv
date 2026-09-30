@@ -250,3 +250,29 @@ async def test_a_new_prompt_summarizes_again(summaries, tmp_path, monkeypatch) -
     monkeypatch.setattr(summarizer, "VERSION", "a-new-prompt")
     await visit()
     assert len(summaries.asked) == 2
+
+
+async def test_panc_always_reads_the_original_description(summaries, monkeypatch) -> None:
+    from revv import panc
+    from revv.models import AiCheck
+
+    read: list[str] = []
+
+    async def fake_check(text: str, program: str | None = None) -> AiCheck:
+        read.append(text)
+        return AiCheck(text=text, verdict="Human", fraction_human=1.0, checked_at=1.0)
+
+    save_config(panc=True)
+    monkeypatch.setattr(panc, "executable", lambda: "/usr/local/bin/panc")
+    monkeypatch.setattr(panc, "check", fake_check)
+    app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo)
+    async with app.run_test(size=(140, 45)) as pilot:
+        screen = await open_review(app, pilot)
+        await pilot.pause(0.3)
+        assert screen.conversation.showing_summary
+        assert read and all(text == LONG for text in read)  # never the summary
+        assert "panc on the original" in description_text(screen)
+        await pilot.press("D")
+        await pilot.pause()
+        text = description_text(screen)
+        assert "panc · " in text and "panc on the original" not in text

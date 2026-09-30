@@ -331,7 +331,9 @@ class ConversationView(VerticalScroll):
         color = {"ai": p.error, "human": p.success}.get(verdict.lower(), p.warning)
         text = Text()
         text.append(f" {verdict.upper()} ", p.style(color.get_contrast_text(1.0), color, bold=True))
-        text.append("  panc · ", p.style(p.faint, p.bg))
+        # panc always reads the original, even while Claude's summary is shown above
+        source = "  panc on the original · " if self.showing_summary else "  panc · "
+        text.append(source, p.style(p.faint, p.bg))
         text.append(f"{check.fraction_ai:.0%} AI", p.style(p.del_fg, p.bg))
         text.append(f" · {check.fraction_ai_assisted:.0%} AI-assisted", p.style(p.warning_fg, p.bg))
         text.append(f" · {check.fraction_human:.0%} human", p.style(p.add_fg, p.bg))
