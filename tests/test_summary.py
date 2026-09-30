@@ -87,6 +87,8 @@ async def test_the_request(fake_api) -> None:
     assert request["betas"] == ["server-side-fallback-2026-07-01"]
     assert request["output_config"] == {"effort": "low"}
     assert "What changed" in request["system"] and "How it was tested" in request["system"]
+    assert "ASD-STE100 Simplified Technical English" in request["system"]
+    assert "A descriptive sentence has a maximum of 25 words." in request["system"]
     content = request["messages"][0]["content"]
     assert "<title>Back off exponentially</title>" in content and LONG in content
 
@@ -211,3 +213,20 @@ async def test_summaries_are_cached_until_the_description_changes_enough(
     rewritten = LONG[: len(LONG) // 2] + "\n\nThe rest was rewritten entirely." * 40
     await visit(rewritten)  # more than 10% changed: summarized again
     assert summaries.asked == [LONG, rewritten]
+
+
+async def test_a_new_prompt_summarizes_again(summaries, tmp_path, monkeypatch) -> None:
+    cache = DiskCache(tmp_path / "cache")
+
+    async def visit() -> None:
+        app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo, cache=cache)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await open_review(app, pilot)
+            await pilot.pause(0.3)
+
+    await visit()
+    await visit()
+    assert len(summaries.asked) == 1
+    monkeypatch.setattr(summarizer, "VERSION", "a-new-prompt")
+    await visit()
+    assert len(summaries.asked) == 2

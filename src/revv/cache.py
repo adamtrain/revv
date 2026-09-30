@@ -168,23 +168,25 @@ class DiskCache:
 
     # -- summaries of long descriptions (Claude) --------------------------------------
 
-    def summary_path(self, ref: PRRef) -> Path:
+    def summary_path(self, ref: PRRef, version: str) -> Path:
+        """`version` identifies the prompt: summaries from another one aren't reused."""
         repo = ref.repo
         return (
             self.root
             / "summaries"
+            / _slug(version)
             / _slug(repo.host)
             / _slug(repo.owner)
             / _slug(repo.name)
             / f"{ref.number}.bin"
         )
 
-    def load_summary(self, ref: PRRef) -> DescriptionSummary | None:
-        value = self._read(self.summary_path(ref))
+    def load_summary(self, ref: PRRef, version: str) -> DescriptionSummary | None:
+        value = self._read(self.summary_path(ref, version))
         return value if isinstance(value, DescriptionSummary) else None
 
-    def save_summary(self, ref: PRRef, summary: DescriptionSummary) -> None:
-        self._write(self.summary_path(ref), summary)
+    def save_summary(self, ref: PRRef, summary: DescriptionSummary, version: str) -> None:
+        self._write(self.summary_path(ref, version), summary)
 
     # -- your teams ------------------------------------------------------------------
 

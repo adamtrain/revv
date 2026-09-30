@@ -1519,7 +1519,9 @@ class ReviewScreen(Screen):
             return
         known = self.summary
         if known is None and session.cache is not None:
-            known = await asyncio.to_thread(session.cache.load_summary, session.ref)
+            known = await asyncio.to_thread(
+                session.cache.load_summary, session.ref, summarizer.VERSION
+            )
             self.summary = known
         if known is not None:
             self.conversation.set_summary(known, running=False)
@@ -1534,7 +1536,9 @@ class ReviewScreen(Screen):
         self.summary = result
         self.conversation.set_summary(result, running=False)
         if session.cache is not None and (result.error is None or result.refused):
-            await asyncio.to_thread(session.cache.save_summary, session.ref, result)
+            await asyncio.to_thread(
+                session.cache.save_summary, session.ref, result, summarizer.VERSION
+            )
         if result.error and not result.refused:
             self.notify(result.error, title="Summary", severity="warning", timeout=5)
         self.update_status()
