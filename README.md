@@ -213,7 +213,7 @@ Press `,` to change any of these in the app; they're saved right away to
 | `refresh_interval` | `30` | seconds between checks for changes on GitHub (`0`: never) |
 | `sidebar_width` | `34` | file tree width (also `<` and `>`) |
 | `inbox_sort` | `"asc"` | oldest first; `"desc"` for newest first |
-| `nicknames` | `{}` | GitHub login → the name you'd rather see (`@` sets them) |
+| `nicknames` | `{}` | GitHub login or `org/team` → the name you'd rather see (`@` sets them) |
 | `panc` | `false` | check descriptions for AI writing (below) |
 | `ignored_labels` | `[]` | labels treated as if they don't exist; `*` matches anything |
 | `ignored_comments` | `[]` | comments treated as if they don't exist (below) |
