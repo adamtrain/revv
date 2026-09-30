@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/adamtrain/revv/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/adamtrain/revv/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white">
   <a href="https://textual.textualize.io"><img alt="Built with Textual" src="https://img.shields.io/badge/built%20with-Textual-8a2be2"></a>
   <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
@@ -289,13 +290,15 @@ git clone https://github.com/adamtrain/revv && cd revv
 uv sync
 uv run revv --demo              # the offline demo
 uv run pytest                   # unit and end-to-end UI tests, all offline
-uv run ruff check && uv run ty check src
+uv run ruff check && uv run ruff format --check && uv run ty check
 uv run scripts/screenshots.py   # regenerate the images in docs/
 ```
 
 The tests drive the whole app with simulated key presses against an in-memory backend, so
 they need no network or GitHub account. The screenshots come from that same demo, with
-made-up sample data.
+made-up sample data. CI runs the same checks, and the tests on Linux and macOS with the
+oldest and newest supported Python, for every push and pull request. It uses no secrets or
+API keys and never runs the live checks below.
 
 ### Live checks against GitHub (opt-in)
 
