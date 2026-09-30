@@ -1535,13 +1535,15 @@ class ReviewScreen(Screen):
             self.conversation.set_summary(known, running=False)
             if not summarizer.changed_enough(known.text, body) and not (force and known.error):
                 return  # it still fits (or failed on this very text, and nobody asked again)
+        long = self.conversation.description_overflows(self.pr)
         if not force:
             if not session.fresh:
                 return  # wait for GitHub's copy: the description may still change
-            if not self.conversation.description_overflows(self.pr):
+            if not long:
                 return  # it fits on a screen as it is (D asks for a summary anyway)
         self.conversation.set_summary(known, running=True)
-        result = await summarizer.summarize(self.pr.title, body)
+        # one that fits on a screen gets a summary about half its length
+        result = await summarizer.summarize(self.pr.title, body, brief=not long)
         self.summary = result
         self.conversation.set_summary(result, running=False)
         if session.cache is not None and (result.error is None or result.refused):

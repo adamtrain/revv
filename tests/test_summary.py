@@ -89,8 +89,18 @@ async def test_the_request(fake_api) -> None:
     assert "What changed" in request["system"] and "How it was tested" in request["system"]
     assert "ASD-STE100 Simplified Technical English" in request["system"]
     assert "A descriptive sentence has a maximum of 25 words." in request["system"]
+    assert "about 300 words and never more than 350" in request["system"]
     content = request["messages"][0]["content"]
     assert "<title>Back off exponentially</title>" in content and LONG in content
+
+
+async def test_a_brief_summary_is_half_as_long_as_the_description(fake_api) -> None:
+    fake_api.results = [message(SUMMARY)]
+    await summarizer.summarize("t", "A short description.", brief=True)
+    [request] = fake_api.calls
+    assert "about half as long as the description" in request["system"]
+    assert "300 words" not in request["system"]
+    assert "Simplified Technical English" in request["system"]
 
 
 async def test_without_server_side_fallback_if_it_is_rejected(fake_api) -> None:
@@ -120,9 +130,11 @@ class Summaries:
 
     def __init__(self) -> None:
         self.asked: list[str] = []
+        self.brief: list[bool] = []
 
-    async def __call__(self, title: str, body: str) -> DescriptionSummary:
+    async def __call__(self, title: str, body: str, *, brief: bool = False) -> DescriptionSummary:
         self.asked.append(body)
+        self.brief.append(brief)
         return DescriptionSummary(text=body, summary=SUMMARY, model=summarizer.MODEL)
 
 
@@ -163,7 +175,7 @@ async def test_a_long_description_is_summarized_and_d_toggles(summaries) -> None
     app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo)
     async with app.run_test(size=(140, 45)) as pilot:
         screen = await open_review(app, pilot)
-        assert summaries.asked == [LONG]
+        assert summaries.asked == [LONG] and summaries.brief == [False]
         conversation = screen.conversation
         assert conversation.showing_summary
         text = description_text(screen)
@@ -188,6 +200,7 @@ async def test_short_descriptions_are_summarized_only_on_request(summaries, monk
         await pilot.press("1", "D")  # asks for one anyway (and shows the conversation)
         await pilot.pause(0.3)
         assert summaries.asked == [backend._pr.body.strip()]
+        assert summaries.brief == [True]  # it fits on a screen: about half its length
         assert screen.tab == "conversation" and screen.conversation.showing_summary
         await pilot.press("D")
         await pilot.pause()
