@@ -294,7 +294,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("x", "resolve / unresolve"),
             ("e d + i", "edit · delete · react · ignore"),
             ("C", "comment on the pull request"),
-            ("D", "a long description: Claude's summary / the original"),
+            ("D", "Claude's summary of the description / the original"),
         ],
     ),
     (

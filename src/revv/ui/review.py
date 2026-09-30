@@ -213,6 +213,7 @@ class ReviewScreen(Screen):
         self.ai_check: AiCheck | None = None  # panc's verdict on the description
         self.summary: DescriptionSummary | None = None  # Claude's, of a long description
         self._summarizing = False
+        self._summary_wanted = False  # D asked for a summary while one was being worked out
         self.ownership: Ownership | None = None  # maintainer teams (a one-repository extra)
         settings = maintainer_settings(session.ref.repo)
         self.group_by_team = settings.group_by_team if settings else True
@@ -1501,18 +1502,25 @@ class ReviewScreen(Screen):
     # -- Claude's summary of a long description ----------------------------------------
 
     @work(group="summary")
-    async def summarize_description(self) -> None:
+    async def summarize_description(self, force: bool = False) -> None:
         """Show Claude's summary of a description longer than a screen: the cached one while
-        it still fits (the description changed by less than 10%), else a new one."""
-        if self._summarizing or not summarizer.available() or not self.session.loaded:
+        it still fits (the description changed by less than 10%), else a new one. With
+        `force` (D asked for it), shorter descriptions are summarized too."""
+        if not summarizer.available() or not self.session.loaded:
+            return
+        if self._summarizing:
+            self._summary_wanted = self._summary_wanted or force
             return
         self._summarizing = True
         try:
-            await self._summarize()
+            await self._summarize(force)
         finally:
             self._summarizing = False
+        if self._summary_wanted:
+            self._summary_wanted = False
+            self.summarize_description(force=True)
 
-    async def _summarize(self) -> None:
+    async def _summarize(self, force: bool) -> None:
         session = self.session
         body = self.pr.body.strip()
         if not body:
@@ -1525,12 +1533,13 @@ class ReviewScreen(Screen):
             self.summary = known
         if known is not None:
             self.conversation.set_summary(known, running=False)
-            if not summarizer.changed_enough(known.text, body):
-                return  # it still fits (or failed on this very text already)
-        if not session.fresh:
-            return  # wait for GitHub's copy: the description may still change
-        if not self.conversation.description_overflows(self.pr):
-            return  # it fits on a screen as it is
+            if not summarizer.changed_enough(known.text, body) and not (force and known.error):
+                return  # it still fits (or failed on this very text, and nobody asked again)
+        if not force:
+            if not session.fresh:
+                return  # wait for GitHub's copy: the description may still change
+            if not self.conversation.description_overflows(self.pr):
+                return  # it fits on a screen as it is (D asks for a summary anyway)
         self.conversation.set_summary(known, running=True)
         result = await summarizer.summarize(self.pr.title, body)
         self.summary = result
@@ -1549,13 +1558,19 @@ class ReviewScreen(Screen):
             return
         conversation = self.conversation
         if not conversation.summary_ready:
-            if conversation.summarizing:
-                message = "Claude is still summarizing the description"
-            elif not summarizer.available():
-                message = "Summaries need ANTHROPIC_API_KEY (and the setting on: ,)"
-            else:
-                message = "Only descriptions longer than a screen get a summary"
-            self.notify(message, timeout=3)
+            if not summarizer.available():
+                self.notify("Summaries need ANTHROPIC_API_KEY (and the setting on: ,)", timeout=3)
+                return
+            if not self.pr.body.strip():
+                self.notify("There's no description to summarize", timeout=2)
+                return
+            if not conversation.summarizing:
+                conversation.show_original = False
+                self.summarize_description(force=True)  # a shorter one: on request
+            if self.tab != "conversation":
+                self.action_switch_tab("conversation")
+            conversation.focus_description()
+            self.notify("Claude is summarizing the description…", timeout=2)
             return
         shown = conversation.toggle_summary()
         if self.tab != "conversation":

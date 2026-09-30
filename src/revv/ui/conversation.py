@@ -291,7 +291,7 @@ class ConversationView(VerticalScroll):
             text.append("D shows Claude's summary", quiet)
         elif self.summarizing:
             text.append("✦ ", star)
-            text.append("Claude is summarizing this long description…", quiet)
+            text.append("Claude is summarizing this description…", quiet)
         elif (
             summary is not None
             and summary.error

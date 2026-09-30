@@ -179,19 +179,26 @@ async def test_a_long_description_is_summarized_and_d_toggles(summaries) -> None
         assert screen.tab == "conversation" and conversation.showing_summary
 
 
-async def test_short_descriptions_and_no_key_cost_nothing(summaries, monkeypatch) -> None:
-    app = RevvApp(DemoBackend(latency=0), target=DEMO_REF, repo=DEMO_REF.repo)
+async def test_short_descriptions_are_summarized_only_on_request(summaries, monkeypatch) -> None:
+    backend = DemoBackend(latency=0)
+    app = RevvApp(backend, target=DEMO_REF, repo=DEMO_REF.repo)
     async with app.run_test(size=(140, 45)) as pilot:
         screen = await open_review(app, pilot)
         assert summaries.asked == []  # the demo's description fits on the screen
+        await pilot.press("1", "D")  # asks for one anyway (and shows the conversation)
+        await pilot.pause(0.3)
+        assert summaries.asked == [backend._pr.body.strip()]
+        assert screen.tab == "conversation" and screen.conversation.showing_summary
         await pilot.press("D")
         await pilot.pause()
-        assert not screen.conversation.showing_summary
+        assert not screen.conversation.showing_summary and len(summaries.asked) == 1
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo)
     async with app.run_test(size=(140, 45)) as pilot:
         await open_review(app, pilot)
-        assert summaries.asked == []
+        await pilot.press("D")
+        await pilot.pause(0.2)
+        assert len(summaries.asked) == 1  # no key: nothing is sent
 
 
 async def test_summaries_are_cached_until_the_description_changes_enough(

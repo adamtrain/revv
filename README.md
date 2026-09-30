@@ -182,7 +182,7 @@ palette.
 | `x` | resolve / unresolve |
 | `e` `d` `+` `i` | edit · delete · react · ignore |
 | `C` | comment on the pull request |
-| `D` | a long description: Claude's summary / the original |
+| `D` | Claude's summary of the description / the original |
 
 | Writing a comment | |
 | --- | --- |
@@ -255,7 +255,8 @@ With `ANTHROPIC_API_KEY` set, a description too long to fit on one screen is sum
 Claude Sonnet 5.5, and the conversation shows the summary: what changed, why, and how it was
 tested, in about 300 words of
 [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/). `D` switches between
-the summary and the original. Summaries are cached per pull request and redone only when the description changes by at
+the summary and the original, and asks for a summary of a shorter description too.
+Summaries are cached per pull request and redone only when the description changes by at
 least 10% (or the prompt changes). The description is sent to Anthropic's API;
 `"summaries": false` (or the switch in the settings) turns this off.
 
