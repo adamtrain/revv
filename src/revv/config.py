@@ -30,7 +30,7 @@ DEFAULTS: dict[str, Any] = {
     "sidebar_width": 34,  # columns of the file tree (< and > change it)
     "open_tab": "conversation",  # what a pull request opens on: "conversation" or "files"
     "panc": False,  # check PR descriptions for AI writing with panc (sends them to Pangram)
-    "summaries": True,  # summarize long PR descriptions with Claude if ANTHROPIC_API_KEY is set
+    "summaries": True,  # summarize long PR descriptions with Claude, through the claude CLI
     "ignored_labels": [],  # label patterns to treat as if they don't exist (`*` wildcards)
     "ignored_comments": [],  # rules: {"author": ..., "text": ...}; see revv.filters
     "maintainers": {},  # the maintainer-teams extra (one repository only); see revv.maintainers

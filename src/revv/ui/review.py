@@ -1541,6 +1541,8 @@ class ReviewScreen(Screen):
                 return  # wait for GitHub's copy: the description may still change
             if not long:
                 return  # it fits on a screen as it is (D asks for a summary anyway)
+        if not await summarizer.signed_in():
+            return  # claude has nobody to answer as: no summary, and nothing to say about it
         self.conversation.set_summary(known, running=True)
         # one that fits on a screen gets a summary about half its length
         result = await summarizer.summarize(self.pr.title, body, brief=not long)
@@ -1554,18 +1556,20 @@ class ReviewScreen(Screen):
             self.notify(result.error, title="Summary", severity="warning", timeout=5)
         self.update_status()
 
-    def action_toggle_summary(self) -> None:
+    async def action_toggle_summary(self) -> None:
         """D: Claude's summary of a long description, or the original."""
         if not self.session.loaded:
             return
         conversation = self.conversation
         if not conversation.summary_ready:
             if not summarizer.available():
-                self.notify("Summaries need ANTHROPIC_API_KEY (and the setting on: ,)", timeout=3)
+                self.notify("Summaries need the claude CLI (and the setting on: ,)", timeout=3)
                 return
             if not self.pr.body.strip():
                 self.notify("There's no description to summarize", timeout=2)
                 return
+            if not await summarizer.signed_in():
+                return  # (as in _summarize)
             if not conversation.summarizing:
                 conversation.show_original = False
                 self.summarize_description(force=True)  # a shorter one: on request

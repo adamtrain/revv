@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -170,12 +169,13 @@ class SettingsScreen(ModalScreen[None]):
                     setting("summaries") is not False,
                 )
                 note = (
-                    f"Uses {summarizer.MODEL_NAME} through Anthropic's API, which gets the "
-                    "description. Summaries are cached per pull request and redone when the "
-                    "description changes by 10% or more; D shows the original."
+                    f"Uses {summarizer.MODEL_NAME} through the claude CLI (claude -p), as whoever "
+                    "is signed in to it; Anthropic gets the description. Summaries are cached "
+                    "per pull request and redone when the description changes by 10% or more; "
+                    "D shows the original."
                 )
-                if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
-                    note += " Needs ANTHROPIC_API_KEY in the environment, which isn't set."
+                if summarizer.executable() is None:
+                    note += " Needs claude on your PATH, where it isn't."
                 yield Static(note, classes="note")
 
                 yield Static("Appearance", classes="heading")

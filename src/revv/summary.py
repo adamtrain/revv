@@ -1,30 +1,48 @@
 """Claude's summaries of pull request descriptions too long to fit on one screen.
 
-When ANTHROPIC_API_KEY is set, such a description is sent to Anthropic's API and the
-conversation shows a short summary instead (what changed, why, and how it was tested),
-written in ASD-STE100 Simplified Technical English; D switches between the summary and the
-original. Summaries are cached per pull request (and prompt), and only redone when the
-description changes by at least 10%. "summaries": false in the
-config (or the switch in the settings) turns this off.
+With the claude CLI (Claude Code) on your PATH and signed in, such a description is given to
+`claude -p` and the conversation shows a short summary instead (what changed, why, and how it
+was tested), written in ASD-STE100 Simplified Technical English; D switches between the
+summary and the original. revv has no API key of its own: claude answers as whoever is
+signed in to it, and if nobody is, there are no summaries and nothing is said about it.
+Summaries are cached per pull request (and prompt), and only redone when the description
+changes by at least 10%. "summaries": false in the config (or the switch in the settings)
+turns this off.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import os
+import json
+import shutil
 import time
 
 from revv.config import setting
 from revv.models import DescriptionSummary
 from revv.panc import changed_enough  # the same "at least 10% changed" rule
 
-__all__ = ["MODEL", "VERSION", "available", "changed_enough", "summarize"]
+__all__ = ["MODEL", "VERSION", "available", "changed_enough", "signed_in", "summarize"]
 
 MODEL = "claude-sonnet-5-5"
 MODEL_NAME = "Claude Sonnet 5.5"
-FALLBACK_BETA = "server-side-fallback-2026-07-01"  # retry declines on another model
-MAX_TOKENS = 16000
-TIMEOUT = 90.0
+TIMEOUT = 120.0
+SIGN_IN_TIMEOUT = 15.0
+SIGN_IN_RECHECK = 30.0  # seconds until a "not signed in" is asked about again
+
+# How claude is run: to print one answer as JSON and exit, as nothing more than the model.
+# The description is someone else's text, so claude gets no tools it could be talked into
+# using, and none of your own setup (CLAUDE.md, skills, hooks, MCP servers) comes along.
+ARGUMENTS = [
+    "-p",
+    *("--output-format", "json"),
+    *("--model", MODEL),
+    *("--effort", "low"),
+    *("--tools", ""),
+    "--safe-mode",
+    "--disable-slash-commands",
+    "--no-session-persistence",
+]
 
 # The ASD-STE100 Simplified Technical English rules the summary follows.
 STE = """\
@@ -150,10 +168,55 @@ BRIEF_SYSTEM = system_prompt(BRIEF_LENGTH)  # for a description summarized only 
 VERSION = hashlib.sha256(f"{MODEL}\n{SYSTEM}\n{BRIEF_SYSTEM}".encode()).hexdigest()[:12]
 
 
+def executable() -> str | None:
+    return shutil.which("claude")
+
+
 def available() -> bool:
-    """Whether to summarize: an API key is set, and the setting isn't turned off."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    return bool(key) and setting("summaries") is not False
+    """Whether to summarize: the claude CLI is installed, and the setting isn't turned off."""
+    return setting("summaries") is not False and executable() is not None
+
+
+async def _run(arguments: list[str], stdin: bytes, timeout: float) -> tuple[int, bytes, bytes]:
+    """Run a command to its end, and never leave it running after a timeout (TimeoutError)
+    or a cancelled worker."""
+    process = await asyncio.create_subprocess_exec(
+        *arguments,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(process.communicate(stdin), timeout)
+    finally:
+        if process.returncode is None:
+            process.kill()
+    return process.returncode or 0, out, err
+
+
+_signed_in: tuple[bool, float] | None = None  # what `claude auth status` said, and when
+
+
+async def signed_in() -> bool:
+    """Whether the claude CLI is signed in, which summaries count on: when it isn't, there
+    are none, and nothing is said about it. A yes is remembered; a no is asked about again
+    after a while, in case you signed in since."""
+    global _signed_in
+    if _signed_in is not None:
+        answer, asked = _signed_in
+        if answer or time.monotonic() - asked < SIGN_IN_RECHECK:
+            return answer
+    program = executable()
+    answer = False
+    if program is not None:
+        try:
+            _, out, _ = await _run([program, "auth", "status", "--json"], b"", SIGN_IN_TIMEOUT)
+            status = json.loads(out)
+            answer = isinstance(status, dict) and status.get("loggedIn") is True
+        except (OSError, ValueError):  # (a timeout is an OSError)
+            answer = False
+    _signed_in = (answer, time.monotonic())
+    return answer
 
 
 def prompt(title: str, body: str) -> str:
@@ -168,44 +231,38 @@ def _failed(body: str, error: str, *, refused: bool = False) -> DescriptionSumma
 
 
 async def summarize(title: str, body: str, *, brief: bool = False) -> DescriptionSummary:
-    """Ask Claude to summarize a description (with `brief`, to about half its length, for
-    one that fits on a screen). Failures come back with `error` set."""
-    import anthropic  # (only needed once a long description shows up)
-    from anthropic.types.beta import BetaTextBlock
-
-    async with anthropic.AsyncAnthropic(timeout=TIMEOUT) as client:
-
-        async def create(fallback: bool):
-            return await client.beta.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=BRIEF_SYSTEM if brief else SYSTEM,
-                output_config={"effort": "low"},
-                messages=[{"role": "user", "content": prompt(title, body)}],
-                betas=[FALLBACK_BETA] if fallback else anthropic.omit,
-                fallbacks="default" if fallback else anthropic.omit,
-            )
-
-        try:
-            try:
-                response = await create(fallback=True)
-            except anthropic.BadRequestError:
-                # e.g. ANTHROPIC_BASE_URL points at a gateway without server-side fallback
-                response = await create(fallback=False)
-        except anthropic.AuthenticationError:
-            return _failed(body, "the Anthropic API didn't accept ANTHROPIC_API_KEY")
-        except anthropic.PermissionDeniedError:
-            return _failed(body, f"the API key can't use {MODEL_NAME}")
-        except anthropic.RateLimitError:
-            return _failed(body, "the Anthropic API is rate limiting requests; try again later")
-        except anthropic.APIStatusError as error:
-            return _failed(body, f"the Anthropic API answered {error.status_code}")
-        except anthropic.APIConnectionError:
-            return _failed(body, "couldn't reach the Anthropic API")
-
-    if response.stop_reason == "refusal":
+    """Ask Claude, through `claude -p`, to summarize a description (with `brief`, to about
+    half its length, for one that fits on a screen). Failures come back with `error` set."""
+    program = executable()
+    if program is None:
+        return _failed(body, "the claude CLI is not installed")
+    system = BRIEF_SYSTEM if brief else SYSTEM
+    try:
+        code, out, err = await _run(
+            [program, *ARGUMENTS, "--system-prompt", system], prompt(title, body).encode(), TIMEOUT
+        )
+    except TimeoutError:
+        return _failed(body, "claude took too long to answer")
+    except OSError as error:
+        return _failed(body, f"couldn't run claude: {error}")
+    try:
+        data = json.loads(out)
+    except ValueError:
+        data = None
+    if isinstance(data, list):  # every message, not only the result: "verbose" in claude's config
+        results = [m for m in data if isinstance(m, dict) and m.get("type") == "result"]
+        data = results[-1] if results else None
+    if not isinstance(data, dict):
+        lines = [ln.strip() for ln in err.decode(errors="replace").splitlines() if ln.strip()]
+        if code != 0:
+            return _failed(body, lines[-1] if lines else f"claude exited with {code}")
+        return _failed(body, "claude returned something unexpected")
+    text = str(data.get("result") or "").strip()
+    if data.get("stop_reason") == "refusal":
         return _failed(body, "Claude declined to summarize this description", refused=True)
-    text = "".join(b.text for b in response.content if isinstance(b, BetaTextBlock)).strip()
+    if data.get("is_error") or code != 0:  # then the result is claude's account of what failed
+        return _failed(body, " ".join(text.split())[:200] or f"claude exited with {code}")
     if not text:
         return _failed(body, "Claude returned an empty summary")
-    return DescriptionSummary(text=body, summary=text, model=response.model, created_at=time.time())
+    model = next(iter(data.get("modelUsage") or {}), MODEL)
+    return DescriptionSummary(text=body, summary=text, model=model, created_at=time.time())

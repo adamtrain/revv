@@ -82,7 +82,7 @@ opens any pull request.
 **The conversation** is where a pull request opens: the description with its reviewers beside
 it, every review thread at a glance (`↵` jumps to it in the code), and the timeline. `x`
 resolves a general comment the way GitHub does, by hiding it as "resolved". A description too
-long for one screen comes summarized by Claude when you have an `ANTHROPIC_API_KEY` (below).
+long for one screen comes summarized by Claude when you have the `claude` CLI (below).
 
 <p align="center">
   <img src="docs/split.svg" width="880" alt="The side-by-side diff: old code on the left and new code on the right, with the changed words highlighted within changed lines.">
@@ -217,7 +217,7 @@ Press `,` to change any of these in the app; they're saved right away to
 | `sidebar_width` | `34` | file tree width (also `<` and `>`) |
 | `inbox_sort` | `"asc"` | oldest first; `"desc"` for newest first |
 | `nicknames` | `{}` | GitHub login or `org/team` → the name you'd rather see (`@` sets them) |
-| `summaries` | `true` | summarize long descriptions with Claude, given `ANTHROPIC_API_KEY` (below) |
+| `summaries` | `true` | summarize long descriptions with Claude, given the `claude` CLI (below) |
 | `panc` | `false` | check descriptions for AI writing (below) |
 | `ignored_labels` | `[]` | labels treated as if they don't exist; `*` matches anything |
 | `ignored_comments` | `[]` | comments treated as if they don't exist (below) |
@@ -252,14 +252,17 @@ or `testimonials.tsx` are never caught:
 
 ### Summaries of long descriptions
 
-With `ANTHROPIC_API_KEY` set, a description too long to fit on one screen is summarized by
-Claude Sonnet 5.5, and the conversation shows the summary: what changed, why, and how it was
-tested, in about 300 words of
-[ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/). `D` switches between
-the summary and the original; on a shorter description, it asks for a summary about half as
-long.
+With [Claude Code](https://claude.com/claude-code)'s `claude` on your `PATH` and signed in, a
+description too long to fit on one screen is summarized by Claude Sonnet 5.5, and the
+conversation shows the summary: what changed, why, and how it was tested, in about 300 words
+of [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/). `D` switches
+between the summary and the original; on a shorter description, it asks for a summary about
+half as long.
+revv runs `claude -p` for this, without tools or your Claude Code setup, so there's no API key
+to set: Claude answers as whoever is signed in to `claude`, and if nobody is, there are simply
+no summaries.
 Summaries are cached per pull request and redone only when the description changes by at
-least 10% (or the prompt changes). The description is sent to Anthropic's API;
+least 10% (or the prompt changes). The description is sent to Anthropic by `claude`;
 `"summaries": false` (or the switch in the settings) turns this off.
 
 ### AI-writing check with panc

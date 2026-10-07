@@ -1,13 +1,16 @@
-"""Claude's summaries of long pull request descriptions (the API is faked here)."""
+"""Claude's summaries of long pull request descriptions, with a fake `claude` executable
+(nothing is sent anywhere)."""
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
 
-import anthropic
-import httpx2
 import pytest
-from anthropic.types.beta import BetaMessage, BetaTextBlock
 
 from revv import summary as summarizer
 from revv.cache import DiskCache
@@ -23,106 +26,190 @@ LONG = "\n\n".join(
 )
 SUMMARY = "**What changed**\nRetries back off exponentially.\n\n**Why**\nFewer outages."
 
+FAKE_CLAUDE = """#!{python}
+import json, os, sys, time
+arguments = sys.argv[1:]
+status = arguments[:2] == ["auth", "status"]
+call = {{"arguments": arguments, "stdin": "" if status else sys.stdin.read(), "pid": os.getpid()}}
+with open(os.environ["CLAUDE_CALLS"], "a") as calls:
+    calls.write(json.dumps(call) + "\\n")
+if status:
+    signed_in = os.environ["CLAUDE_SIGNED_IN"] == "1"
+    print(json.dumps({{"loggedIn": signed_in, "authMethod": "claude.ai" if signed_in else "none"}}))
+    sys.exit(0 if signed_in else 1)
+time.sleep(float(os.environ["CLAUDE_SLEEP"]))
+sys.stdout.write(os.environ["CLAUDE_STDOUT"])
+sys.stderr.write(os.environ["CLAUDE_STDERR"])
+sys.exit(int(os.environ["CLAUDE_EXIT"]))
+"""
 
-def message(text: str, stop_reason: str = "end_turn") -> BetaMessage:
-    block = BetaTextBlock.model_construct(type="text", text=text, citations=None)
-    return BetaMessage.model_construct(
-        content=[block] if text else [], stop_reason=stop_reason, model=summarizer.MODEL
-    )
 
+class FakeClaude:
+    """A `claude` that records how it was run, and answers what the test tells it to."""
 
-def status_error(cls: type[anthropic.APIStatusError], code: int) -> anthropic.APIStatusError:
-    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-    return cls("nope", response=httpx2.Response(code, request=request), body=None)
+    def __init__(self, directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.program = directory / "claude"
+        self.program.write_text(FAKE_CLAUDE.format(python=sys.executable))
+        self.program.chmod(0o755)
+        self.log = directory / "claude-calls"
+        self.monkeypatch = monkeypatch
+        monkeypatch.setenv("CLAUDE_CALLS", str(self.log))
+        monkeypatch.setenv("CLAUDE_SLEEP", "0")
+        monkeypatch.setattr(summarizer, "executable", lambda: str(self.program))
+        self.sign_in(True)
+        self.answer(SUMMARY)
 
+    def sign_in(self, signed_in: bool) -> None:
+        self.monkeypatch.setenv("CLAUDE_SIGNED_IN", "1" if signed_in else "0")
 
-class FakeAnthropic:
-    """Stands in for anthropic.AsyncAnthropic: records requests, plays back `results`."""
+    def answer(self, result: str, *, code: int = 0, **fields: Any) -> None:
+        """What `claude -p --output-format json` prints: its last message, the result."""
+        reply = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": result,
+            "stop_reason": "end_turn",
+            "modelUsage": {summarizer.MODEL: {"outputTokens": 11}},
+            **fields,
+        }
+        self.print(json.dumps(reply), code=code)
 
-    calls: ClassVar[list[dict[str, Any]]] = []
-    results: ClassVar[list[object]] = []
+    def print(self, stdout: str, stderr: str = "", *, code: int = 0) -> None:
+        self.monkeypatch.setenv("CLAUDE_STDOUT", stdout)
+        self.monkeypatch.setenv("CLAUDE_STDERR", stderr)
+        self.monkeypatch.setenv("CLAUDE_EXIT", str(code))
 
-    def __init__(self, **options: Any) -> None:
-        self.beta = self
-        self.messages = self
+    @property
+    def calls(self) -> list[dict[str, Any]]:
+        lines = self.log.read_text().splitlines() if self.log.exists() else []
+        return [json.loads(line) for line in lines]
 
-    async def __aenter__(self) -> FakeAnthropic:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-    async def create(self, **request: Any) -> BetaMessage:
-        FakeAnthropic.calls.append(request)
-        result = FakeAnthropic.results.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        assert isinstance(result, BetaMessage)
-        return result
+    @property
+    def requests(self) -> list[dict[str, Any]]:
+        return [call for call in self.calls if "-p" in call["arguments"]]
 
 
 @pytest.fixture
-def fake_api(monkeypatch) -> type[FakeAnthropic]:
-    monkeypatch.setattr(anthropic, "AsyncAnthropic", FakeAnthropic)
-    FakeAnthropic.calls, FakeAnthropic.results = [], []
-    return FakeAnthropic
+def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeClaude:
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    return FakeClaude(directory, monkeypatch)
 
 
-def test_only_with_a_key_and_the_setting_on(monkeypatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert not summarizer.available()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+def option(request: dict[str, Any], name: str) -> str:
+    arguments = request["arguments"]
+    return arguments[arguments.index(name) + 1]
+
+
+def test_only_with_claude_and_the_setting_on(fake_claude, monkeypatch) -> None:
     assert summarizer.available()
     save_config(summaries=False)
     assert not summarizer.available()
+    save_config(summaries=True)
+    monkeypatch.setattr(summarizer, "executable", lambda: None)
+    assert not summarizer.available()
 
 
-async def test_the_request(fake_api) -> None:
-    fake_api.results = [message(SUMMARY)]
+async def test_the_command(fake_claude, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # there's no key to set
     result = await summarizer.summarize("Back off exponentially", LONG)
     assert result.summary == SUMMARY and result.error is None and result.text == LONG
-    [request] = fake_api.calls
-    assert request["model"] == "claude-sonnet-5-5"
-    assert request["fallbacks"] == "default"
-    assert request["betas"] == ["server-side-fallback-2026-07-01"]
-    assert request["output_config"] == {"effort": "low"}
-    assert "What changed" in request["system"] and "How it was tested" in request["system"]
-    assert "ASD-STE100 Simplified Technical English" in request["system"]
-    assert "A descriptive sentence has a maximum of 25 words." in request["system"]
-    assert "about 300 words and never more than 350" in request["system"]
-    content = request["messages"][0]["content"]
-    assert "<title>Back off exponentially</title>" in content and LONG in content
+    assert result.model == "claude-sonnet-5-5"
+    [request] = fake_claude.requests
+    assert request["arguments"][0] == "-p"
+    assert option(request, "--output-format") == "json"
+    assert option(request, "--model") == "claude-sonnet-5-5"
+    assert option(request, "--effort") == "low"
+    assert option(request, "--tools") == ""  # the description can't talk claude into anything
+    assert "--safe-mode" in request["arguments"]
+    assert "--no-session-persistence" in request["arguments"]
+    system = option(request, "--system-prompt")
+    assert "What changed" in system and "How it was tested" in system
+    assert "ASD-STE100 Simplified Technical English" in system
+    assert "A descriptive sentence has a maximum of 25 words." in system
+    assert "about 300 words and never more than 350" in system
+    assert "<title>Back off exponentially</title>" in request["stdin"] and LONG in request["stdin"]
 
 
-async def test_a_brief_summary_is_half_as_long_as_the_description(fake_api) -> None:
-    fake_api.results = [message(SUMMARY)]
+async def test_the_result_among_every_message_of_a_verbose_claude(fake_claude) -> None:
+    result = {"type": "result", "is_error": False, "result": SUMMARY, "stop_reason": "end_turn"}
+    fake_claude.print(json.dumps([{"type": "system"}, {"type": "assistant"}, result]))
+    summary = await summarizer.summarize("t", LONG)
+    assert summary.summary == SUMMARY and summary.model == summarizer.MODEL
+    fake_claude.print(json.dumps([{"type": "system"}]))
+    assert (await summarizer.summarize("t", LONG)).error == "claude returned something unexpected"
+
+
+async def test_a_brief_summary_is_half_as_long_as_the_description(fake_claude) -> None:
     await summarizer.summarize("t", "A short description.", brief=True)
-    [request] = fake_api.calls
-    assert "about half as long as the description" in request["system"]
-    assert "300 words" not in request["system"]
-    assert "Simplified Technical English" in request["system"]
+    [request] = fake_claude.requests
+    system = option(request, "--system-prompt")
+    assert "about half as long as the description" in system
+    assert "300 words" not in system
+    assert "Simplified Technical English" in system
 
 
-async def test_without_server_side_fallback_if_it_is_rejected(fake_api) -> None:
-    fake_api.results = [status_error(anthropic.BadRequestError, 400), message(SUMMARY)]
-    result = await summarizer.summarize("t", LONG)
-    assert result.summary == SUMMARY
-    assert [
-        ("fallbacks" in c and c["fallbacks"] is not anthropic.omit) for c in fake_api.calls
-    ] == [
-        True,
-        False,
-    ]
-
-
-async def test_refusals_and_errors(fake_api) -> None:
-    fake_api.results = [message("", stop_reason="refusal")]
+async def test_refusals_and_errors(fake_claude, monkeypatch) -> None:
+    fake_claude.answer("", stop_reason="refusal")
     refused = await summarizer.summarize("t", LONG)
     assert refused.refused and refused.error and not refused.summary
-    fake_api.results = [status_error(anthropic.AuthenticationError, 401)]
+    fake_claude.answer(
+        "API Error: Repeated 529 Overloaded errors", code=1, is_error=True, api_error_status=529
+    )
     failed = await summarizer.summarize("t", LONG)
-    assert failed.error is not None and "ANTHROPIC_API_KEY" in failed.error
-    assert not failed.refused
+    assert failed.error == "API Error: Repeated 529 Overloaded errors"
+    assert not failed.refused and not failed.summary
+    fake_claude.answer("  ")
+    empty = await summarizer.summarize("t", LONG)
+    assert empty.error == "Claude returned an empty summary"
+    fake_claude.print("", "warning: something\nerror: unknown option '--safe-mode'\n", code=1)
+    old = await summarizer.summarize("t", LONG)
+    assert old.error == "error: unknown option '--safe-mode'"
+    fake_claude.print("Retries back off exponentially.")
+    text = await summarizer.summarize("t", LONG)
+    assert text.error == "claude returned something unexpected" and not text.summary
+    monkeypatch.setattr(summarizer, "executable", lambda: None)
+    missing = await summarizer.summarize("t", LONG)
+    assert missing.error == "the claude CLI is not installed"
+
+
+async def test_a_claude_that_hangs_is_stopped(fake_claude, monkeypatch) -> None:
+    monkeypatch.setenv("CLAUDE_SLEEP", "60")
+    monkeypatch.setattr(summarizer, "TIMEOUT", 0.5)
+    result = await summarizer.summarize("t", LONG)
+    assert result.error == "claude took too long to answer"
+    [request] = fake_claude.requests
+    for _ in range(100):
+        try:
+            os.kill(request["pid"], 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("claude is still running")
+
+
+async def test_signed_in_is_what_claude_says(fake_claude, monkeypatch) -> None:
+    fake_claude.sign_in(False)
+    assert not await summarizer.signed_in()
+    assert not await summarizer.signed_in()  # not asked about again right away...
+    assert len(fake_claude.calls) == 1
+    assert fake_claude.calls[0]["arguments"] == ["auth", "status", "--json"]
+    fake_claude.sign_in(True)
+    monkeypatch.setattr(summarizer, "SIGN_IN_RECHECK", 0.0)
+    assert await summarizer.signed_in()  # ...but after a while, and by then you signed in
+    fake_claude.sign_in(False)
+    assert await summarizer.signed_in()  # a yes is remembered
+    assert len(fake_claude.calls) == 2
+    assert fake_claude.requests == []
+
+
+async def test_signed_in_takes_a_claude_that_answers(fake_claude, monkeypatch) -> None:
+    fake_claude.program.write_text(f"#!{sys.executable}\nprint('Unknown command: auth')\n")
+    assert not await summarizer.signed_in()
+    monkeypatch.setattr(summarizer, "_signed_in", None)
+    monkeypatch.setattr(summarizer, "executable", lambda: None)
+    assert not await summarizer.signed_in()
 
 
 class Summaries:
@@ -131,18 +218,23 @@ class Summaries:
     def __init__(self) -> None:
         self.asked: list[str] = []
         self.brief: list[bool] = []
+        self.signed_in = True
 
     async def __call__(self, title: str, body: str, *, brief: bool = False) -> DescriptionSummary:
         self.asked.append(body)
         self.brief.append(brief)
         return DescriptionSummary(text=body, summary=SUMMARY, model=summarizer.MODEL)
 
+    async def is_signed_in(self) -> bool:
+        return self.signed_in
+
 
 @pytest.fixture
 def summaries(monkeypatch) -> Summaries:
     fake = Summaries()
     monkeypatch.setattr(summarizer, "summarize", fake)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(summarizer, "signed_in", fake.is_signed_in)
+    monkeypatch.setattr(summarizer, "executable", lambda: "/usr/local/bin/claude")
     return fake
 
 
@@ -205,13 +297,36 @@ async def test_short_descriptions_are_summarized_only_on_request(summaries, monk
         await pilot.press("D")
         await pilot.pause()
         assert not screen.conversation.showing_summary and len(summaries.asked) == 1
-    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setattr(summarizer, "executable", lambda: None)
     app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo)
     async with app.run_test(size=(140, 45)) as pilot:
         await open_review(app, pilot)
         await pilot.press("D")
         await pilot.pause(0.2)
-        assert len(summaries.asked) == 1  # no key: nothing is sent
+        assert len(summaries.asked) == 1  # no claude: nothing is asked
+
+
+async def test_signed_out_of_claude_nothing_happens_and_nothing_is_said(
+    summaries, monkeypatch
+) -> None:
+    from revv.ui.review import ReviewScreen
+
+    said: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(ReviewScreen, "notify", lambda self, *message, **how: said.append(message))
+    summaries.signed_in = False
+    app = RevvApp(long_demo(), target=DEMO_REF, repo=DEMO_REF.repo)
+    async with app.run_test(size=(140, 45)) as pilot:
+        screen = await open_review(app, pilot)
+        text = description_text(screen)
+        assert "Paragraph 1:" in text and "Claude" not in text
+        await pilot.press("1", "D")
+        await pilot.pause(0.3)
+        assert screen.tab == "files" and not screen.conversation.summarizing
+        assert summaries.asked == [] and said == []
+        summaries.signed_in = True  # signed in since: D works
+        await pilot.press("D")
+        await pilot.pause(0.3)
+        assert summaries.asked == [LONG] and screen.conversation.showing_summary
 
 
 async def test_summaries_are_cached_until_the_description_changes_enough(
