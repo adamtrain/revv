@@ -588,6 +588,11 @@ class InboxScreen(Screen):
         table.add_row(gutters[0], title, reason)
         table.add_row(gutters[1], who, checks)
         table.add_row(gutters[2], detail, status)
+        if item.queue_position:
+            queue = Text(
+                f"⧗ merge queue {item.queue_position}/{item.queue_size}", p.style(p.accent_fg)
+            )
+            table.add_row(gutters[2], Text(""), queue)
         return table
 
     def _teams_on_row(self, item: PRSummary) -> list[str]:

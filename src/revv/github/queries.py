@@ -364,6 +364,8 @@ query Details($ids: [ID!]!) {
         nodes { requestedReviewer { __typename ... on User { login } ... on Team { combinedSlug } } }
       }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      mergeQueueEntry { position }
+      mergeQueue { entries { totalCount } }
     }
   }
 }

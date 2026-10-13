@@ -1047,3 +1047,31 @@ async def test_inbox_nickname_includes_the_requested_team(backend: DemoBackend) 
         console = Console(width=140, file=io.StringIO(), record=True)
         console.print(options.get_option(key).prompt)
         assert "team: Pythonistas" in console.export_text()
+
+
+async def test_inbox_shows_merge_queue_position(backend: DemoBackend) -> None:
+    import io
+
+    from rich.console import Console
+    from textual.widgets import OptionList, Tabs
+
+    from revv.github.parse import apply_details
+
+    app = RevvApp(backend, repo=DEMO_REF.repo)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        inbox = app.screen
+        assert isinstance(inbox, InboxScreen)
+        inbox.query_one(Tabs).active = "mine"
+        await pilot.pause()
+        options = inbox.query_one(OptionList)
+        console = Console(width=140, file=io.StringIO(), record=True)
+        console.print(options.get_option("github.com/acme/netkit#58").prompt)
+        assert "merge queue 2/5" in console.export_text()
+
+    item = next(s for s in inbox.sections if s.key == "mine").items[0]
+    node = {"id": item.node_id, "mergeQueue": {"entries": {"totalCount": 3}}}
+    apply_details({"nodes": [{**node, "mergeQueueEntry": {"position": 1}}]}, [item])
+    assert (item.queue_position, item.queue_size) == (1, 3)
+    apply_details({"nodes": [{**node, "mergeQueueEntry": None}]}, [item])
+    assert (item.queue_position, item.queue_size) == (0, 0)

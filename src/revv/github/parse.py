@@ -324,6 +324,8 @@ def apply_details(data: Json, items: list[PRSummary]) -> None:
         head = _nodes(node.get("commits"))
         rollup = (head[0].get("commit") or {}).get("statusCheckRollup") if head else None
         assignees = {_login(a) for a in _nodes(node.get("assignees"))}
+        position = (node.get("mergeQueueEntry") or {}).get("position") or 0
+        queued = ((node.get("mergeQueue") or {}).get("entries") or {}).get("totalCount") or 0
         for item in by_id[node["id"]]:
             item.review_decision = node.get("reviewDecision")
             item.additions = node.get("additions") or 0
@@ -334,4 +336,6 @@ def apply_details(data: Json, items: list[PRSummary]) -> None:
             item.requested_teams = teams
             item.assigned = viewer in assignees
             item.checks_state = rollup.get("state") if rollup else None
+            item.queue_position = position
+            item.queue_size = queued if position else 0
             item.details_loaded = True

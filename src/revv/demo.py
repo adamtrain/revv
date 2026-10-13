@@ -1082,6 +1082,18 @@ class DemoBackend:
             deletions=97,
             comments=1,
         )
+        queued = summary(
+            58,
+            "Retry idempotent requests on reset",
+            VIEWER,
+            2,
+            review_decision="APPROVED",
+            checks_state="SUCCESS",
+            queue_position=2,
+            queue_size=5,
+            additions=74,
+            deletions=11,
+        )
         stack_first = summary(
             44,
             "Extract URL helpers into netkit.urls",
@@ -1116,7 +1128,7 @@ class DemoBackend:
             stack_position=2,
             base_ref="extract-url-helpers",
         )
-        for item in (main, rereview, team, reviewed, mine, stack_first, stack_second):
+        for item in (main, rereview, team, reviewed, mine, queued, stack_first, stack_second):
             item.node_id = f"PR_{item.ref.number}"
             item.base_ref = item.base_ref or "main"
         if "review-requested:@me" in query:
@@ -1126,7 +1138,7 @@ class DemoBackend:
         if "reviewed-by:@me" in query:
             return [rereview, reviewed]
         if "author:@me" in query:
-            return [mine]
+            return [queued, mine]
         return [main, rereview, team, reviewed, mine, stack_first, stack_second]
 
     async def pull_request_details(self, items: list[PRSummary]) -> None:

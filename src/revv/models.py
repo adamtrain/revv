@@ -447,6 +447,9 @@ class PRSummary:
     head_ref: str = ""
     base_ref: str = ""
     checks_state: str | None = None
+    # the pull request's place in its base branch's merge queue; 0: not queued
+    queue_position: int = 0
+    queue_size: int = 0
     labels: list[Label] = field(default_factory=list)
     # GitHub's native stacked pull requests
     stack_id: str | None = None

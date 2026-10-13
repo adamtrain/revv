@@ -69,6 +69,8 @@ DETAIL_FIELDS = (
     "requested_directly",
     "requested_teams",
     "checks_state",
+    "queue_position",
+    "queue_size",
     "details_loaded",
     "maintainers",
 )
