@@ -170,7 +170,7 @@ palette.
 | `A` | approve… |
 | `C` | comment on the pull request |
 | `R` | refresh (applies changes noticed on GitHub) |
-| `o` | open in the browser |
+| `o` | open in the browser (or click the title or ↗ GitHub in the header) |
 | `y` | copy path:line |
 | `t` | hide / show the file tree |
 | `<` `>` | narrower / wider file tree |
@@ -184,6 +184,7 @@ palette.
 | `e` `d` `+` `i` | edit · delete · react · ignore |
 | `C` | comment on the pull request |
 | `D` | Claude's summary of the description / the original |
+| `click` | a link in a description or comment: open it in the browser |
 
 | Writing a comment | |
 | --- | --- |

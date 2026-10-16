@@ -1075,3 +1075,89 @@ async def test_inbox_shows_merge_queue_position(backend: DemoBackend) -> None:
     assert (item.queue_position, item.queue_size) == (1, 3)
     apply_details({"nodes": [{**node, "mergeQueueEntry": None}]}, [item])
     assert (item.queue_position, item.queue_size) == (0, 0)
+
+
+def link_offset(widget, url: str) -> tuple[int, int]:
+    """Where in a widget (x, y) a link to the URL is drawn."""
+    for y in range(widget.size.height):
+        x = widget.content_region.x - widget.region.x  # render_line leaves out the padding
+        for segment in widget.render_line(y):
+            if segment.style is not None and segment.style.link == url and segment.text.strip():
+                return x, y
+            x += segment.cell_length
+    raise AssertionError(f"no link to {url}")
+
+
+async def test_links_in_the_description_open_in_the_browser(app: RevvApp, monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(app, "open_url", lambda url, **_: opened.append(url))
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        screen.pr.body = "See [the design doc](https://example.com/design) first."
+        card = next(c for c in screen.query(Card) if c.item.kind == "description")
+        card.invalidate()
+        await pilot.pause()
+        x, y = link_offset(card, "https://example.com/design")
+        await pilot.click(card, offset=(x, y))
+        await pilot.pause()
+        assert opened == ["https://example.com/design"]
+        assert card.item.expanded  # the click opened the link and didn't fold the card
+        # a click away from the link doesn't open anything
+        await pilot.click(card, offset=(card.size.width - 2, y))
+        await pilot.pause()
+        assert opened == ["https://example.com/design"]
+
+
+async def test_the_header_opens_the_pull_request_in_the_browser(app: RevvApp, monkeypatch) -> None:
+    from revv.ui.widgets import PRHeader
+
+    opened: list[str] = []
+    monkeypatch.setattr(app, "open_url", lambda url, **_: opened.append(url))
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot)
+        header = screen.query_one(PRHeader)
+        assert "↗ GitHub" in header.render().plain
+        x, y = link_offset(header, screen.pr.url)
+        await pilot.click(header, offset=(x, y))
+        await pilot.pause()
+        assert opened == [screen.pr.url]
+
+
+async def test_bare_urls_in_the_description_are_links(app: RevvApp, monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(app, "open_url", lambda url, **_: opened.append(url))
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await loaded(pilot, tab="conversation")
+        screen.pr.body = (
+            "Fixes https://example.com/issues/7. See README.md and `https://example.com/code`."
+        )
+        card = next(c for c in screen.query(Card) if c.item.kind == "description")
+        card.invalidate()
+        await pilot.pause()
+        links = {
+            segment.style.link
+            for y in range(card.size.height)
+            for segment in card.render_line(y)
+            if segment.style is not None and segment.style.link
+        }
+        # the trailing full stop isn't part of it; filenames and code aren't links
+        assert links == {"https://example.com/issues/7"}
+        x, y = link_offset(card, "https://example.com/issues/7")
+        await pilot.click(card, offset=(x, y))
+        await pilot.pause()
+        assert opened == ["https://example.com/issues/7"]
+
+
+async def test_bare_urls_are_only_linked_when_asked(app: RevvApp) -> None:
+    from revv.ui.palette import Palette
+    from revv.ui.render import MarkdownRenderer
+
+    async with app.run_test(size=SIZE):
+        md = MarkdownRenderer(Palette.from_app(app))
+
+        def links(**kwargs) -> set[str]:
+            strips = md.markdown("See https://example.com/a", 80, **kwargs)
+            return {s.style.link for strip in strips for s in strip if s.style and s.style.link}
+
+        assert links() == set()  # comments: as before
+        assert links(autolink=True) == {"https://example.com/a"}  # descriptions
