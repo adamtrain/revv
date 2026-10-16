@@ -100,7 +100,10 @@ class Card(Widget, can_focus=True):
 
     def on_click(self, event: events.Click) -> None:
         self.focus()
-        if event.chain >= 2:
+        if event.style.link:  # a link in the markdown: open it, don't fold the card
+            self.app.open_url(event.style.link)
+            self.notify(f"Opened {event.style.link}", timeout=2)
+        elif event.chain >= 2:
             self.view.activate(self)
 
 
@@ -472,10 +475,10 @@ class ConversationView(VerticalScroll):
         strips.append(self._render_text(bottom, width, bg))
         return strips
 
-    def _markdown(self, body: str, width: int) -> list[Strip]:
+    def _markdown(self, body: str, width: int, autolink: bool = False) -> list[Strip]:
         p = self.palette
         body = SUGGESTION_RE.sub(lambda m: "```\n" + m.group(1) + "```\n_(suggested change)_", body)
-        return self.md.markdown(body, width, p.style(p.text, p.bg))
+        return self.md.markdown(body, width, p.style(p.text, p.bg), autolink=autolink)
 
     def _reactions(self, obj: Comment | Review | PullRequest, width: int) -> list[Strip]:
         if not obj.reactions:
@@ -519,7 +522,7 @@ class ConversationView(VerticalScroll):
             # reviewers in a column to the right of the description
             left_width = inner - side - 3
             note = [] if original else self._summary_note(left_width)
-            left = [*note, *self._markdown(body_text, left_width)]
+            left = [*note, *self._markdown(body_text, left_width, autolink=True)]
             column = [self._render_text(line, side, bg) for line in people]
             divider = Segment(" │ ", p.style(p.fg_mix(0.15), p.bg))
             body = [
@@ -538,7 +541,7 @@ class ConversationView(VerticalScroll):
             ]
         else:
             note = [] if original else self._summary_note(inner)
-            body = [*note, *self._markdown(body_text, inner)]
+            body = [*note, *self._markdown(body_text, inner, autolink=True)]
             if people:
                 body.append(Strip.blank(inner, bg))
                 body += [self._render_text(line, inner, bg) for line in people]

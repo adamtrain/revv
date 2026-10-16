@@ -6,7 +6,9 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 
+from markdown_it import MarkdownIt
 from rich.console import Console, RenderableType
 from rich.markdown import Markdown
 from rich.segment import Segment
@@ -100,7 +102,10 @@ class MarkdownRenderer:
         lines = self.console.render_lines(renderable, options, style=bg, pad=True)
         return [Strip(line, width) for line in lines]
 
-    def markdown(self, body: str, width: int, bg: Style | None = None) -> list[Strip]:
+    def markdown(
+        self, body: str, width: int, bg: Style | None = None, autolink: bool = False
+    ) -> list[Strip]:
+        """`autolink`: also make bare http(s) URLs links, as GitHub does."""
         body = body.strip() or "_(no description)_"
         markdown = Markdown(
             body,
@@ -108,7 +113,20 @@ class MarkdownRenderer:
             inline_code_theme=None,
             hyperlinks=True,
         )
+        if autolink:
+            markdown.parsed = _linkifier().parse(body)
         return self.lines(markdown, width, bg)
+
+
+@cache
+def _linkifier() -> MarkdownIt:
+    """Rich's markdown parser, plus links for bare URLs (only with a scheme: no
+    `README.md` or `www.` guesses)."""
+    parser = MarkdownIt("commonmark", {"linkify": True})
+    parser.enable(["strikethrough", "table", "linkify"])
+    assert parser.linkify is not None  # linkify-it-py comes with textual
+    parser.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+    return parser
 
 
 @dataclass(slots=True)

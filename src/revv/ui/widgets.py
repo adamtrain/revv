@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from rich.style import Style
 from rich.text import Text
+from textual import events
 from textual.reactive import reactive
 from textual.widget import Widget
 
@@ -83,12 +85,16 @@ class PRHeader(Widget):
             left.append_text(right)
             return left
 
-        # 1: what it is, and where you are
+        # 1: what it is, and where you are (the number, the title and ↗ open it on GitHub)
+        link = Style(link=pr.url) if pr.url else Style()
         title = Text()
         title.append(f"{pr.ref.repo.full_name} ", p.style(p.muted))
-        title.append(f"#{pr.ref.number} ", p.style(p.primary_fg, bold=True))
-        title.append(pr.title, p.style(p.text, bold=True))
+        title.append(f"#{pr.ref.number} ", p.style(p.primary_fg, bold=True) + link)
+        title.append(pr.title, p.style(p.text, bold=True) + link)
         tabs = Text()
+        if pr.url:
+            tabs.append(" ↗ GitHub ", p.style(p.primary_fg, bold=True) + link)
+            tabs.append("  ")
         if self.ai is not None and not self.ai.error and self.ai.verdict:
             verdict = self.ai.verdict.strip()
             color = {"ai": p.error, "human": p.success}.get(verdict.lower(), p.warning)
@@ -187,8 +193,11 @@ class PRHeader(Widget):
         text.append(f" · {viewed}/{len(files)} files viewed", p.style(p.muted))
         return text
 
-    async def on_click(self, event) -> None:
-        if event.y == 0 and self.pr is not None:
+    async def on_click(self, event: events.Click) -> None:
+        if event.style.link:  # the number, the title or ↗ GitHub
+            self.app.open_url(event.style.link)
+            self.notify(f"Opened {event.style.link}", timeout=2)
+        elif event.y == 0 and self.pr is not None:
             width = self.content_region.width
             if event.x > width - 34:
                 await self.screen.run_action(
